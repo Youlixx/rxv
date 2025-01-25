@@ -16,7 +16,7 @@ use tokio::net::TcpListener;
 async fn main() {
     aide::generate::extract_schemas(true);
 
-    let state = AppState::new("sqlite:/db.sqlite").await.unwrap();
+    let state = AppState::new("/storage").await.unwrap();
 
     let mut api = OpenApi::default();
 

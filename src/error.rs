@@ -1,3 +1,5 @@
+use std::io;
+
 /// A specialized `Result` type for rvx.
 pub type Result<T, E = Error> = ::std::result::Result<T, E>;
 
@@ -6,5 +8,8 @@ pub type Result<T, E = Error> = ::std::result::Result<T, E>;
 #[non_exhaustive]
 pub enum Error {
     #[error("sql related error")]
-    Sql(#[from] sqlx::Error)
+    Sql(#[from] sqlx::Error),
+
+    #[error("IO related error")]
+    Io(#[from] io::Error)
 }
