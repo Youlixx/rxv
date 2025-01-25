@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 
 use crate::error::Result;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AppState {
     database: SqlitePool,
 }
