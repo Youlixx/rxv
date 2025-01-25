@@ -1,13 +1,19 @@
 use sqlx::SqlitePool;
 
+use crate::error::Result;
+
 #[derive(Debug)]
 pub struct AppState {
     database: SqlitePool,
 }
 
 impl AppState {
-    pub async fn new(database_url: &str) -> Option<Self> {
-        let database = SqlitePool::connect(database_url).await.ok()?;
+    /// Create and initialize the SQLite database with default tables.
+    ///
+    /// The given database url must point to either memory or an existing file.
+    /// If the file is not existing, the connection will fail.
+    pub async fn new(database_url: &str) -> Result<Self> {
+        let database = SqlitePool::connect(database_url).await?;
 
         sqlx::query!(
             "
@@ -21,8 +27,7 @@ impl AppState {
             ",
         )
         .execute(&database)
-        .await
-        .ok()?;
+        .await?;
 
         sqlx::query(
             "
@@ -35,9 +40,8 @@ impl AppState {
                 )
                 "
         ).execute(&database)
-        .await
-        .ok()?;
+        .await?;
 
-        Some(Self { database })
+        Ok(Self { database })
     }
 }

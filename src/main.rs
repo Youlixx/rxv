@@ -1,4 +1,5 @@
 pub mod database;
+pub mod error;
 
 use database::AppState;
 
