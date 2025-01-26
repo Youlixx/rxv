@@ -1,7 +1,7 @@
-use std::{hash, io, path::PathBuf};
+use std::path::PathBuf;
 
 use axum::{
-    extract::{multipart::MultipartError, Multipart, State},
+    extract::{Multipart, State},
     http::StatusCode,
 };
 use md5::Md5;
@@ -12,7 +12,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     database::AppState,
-    response::{ApiErrorCode, ApiResponse},
+    response::{ApiResponse, ApiResult, Error, Result},
 };
 
 pub fn router(state: AppState) -> OpenApiRouter {
@@ -41,77 +41,35 @@ struct UploadFileRequest {
         (status = 201, description = "The file was successfully uploaded")
     )
 )]
-async fn upload_file(State(state): State<AppState>, multipart: Multipart) -> ApiResponse<()> {
+async fn upload_file(State(state): State<AppState>, multipart: Multipart) -> ApiResult<()> {
     // TODO generate unique path, maybe use uuid to ensure uniqueness.
     let path_temp_file = "/tmp/test";
 
     let parsing_results = {
-        let mut temp_file = match File::create(&path_temp_file).await {
-            Ok(file) => file,
-            Err(error) => return ApiResponse::failure(ApiErrorCode::ServerIO, &error.to_string()),
-        };
-
+        let mut temp_file = File::create(&path_temp_file).await?;
         ParsingResults::parse(&mut temp_file, multipart).await
     };
 
     if let Ok(parsing_results) = &parsing_results {
         // TODO put the file in the storage using the given state and copy tempfile.
         println!("parsing_results={:#?}", parsing_results);
-        state.add_new_file_to_storage(
-            &parsing_results.path_storage,
-            path_temp_file,
-            &parsing_results.hash_md5,
-            &parsing_results.hash_sha256
-        ).await;
+        state
+            .add_new_file_to_storage(
+                &parsing_results.path_storage,
+                path_temp_file,
+                &parsing_results.hash_md5,
+                &parsing_results.hash_sha256,
+            )
+            .await;
     }
 
     if let Err(error) = remove_file(path_temp_file).await {
         // TODO: we don't really want to throw an error if removing the temp
         // file failed, maybe raise a warning on the server side?
-        return ApiResponse::failure(ApiErrorCode::ServerIO, &error.to_string());
+        return Err(Error::ServerIo(error));
     }
 
-    match parsing_results {
-        Err(error) => error.into(),
-        _ => ApiResponse::success_with_status_code(StatusCode::CREATED, ()),
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ParsingError {
-    #[error("multipart related error")]
-    Multipart(#[from] MultipartError),
-
-    #[error("io related error")]
-    Io(#[from] io::Error),
-
-    #[error("path is missing from the multipart")]
-    MissingPath,
-
-    #[error("file is missing from the multipart")]
-    MissingFile,
-}
-
-impl<T> From<ParsingError> for ApiResponse<T> {
-    fn from(value: ParsingError) -> Self {
-        let (api_error_code, error_message) = match value {
-            ParsingError::Io(error) => (ApiErrorCode::ServerIO, error.to_string()),
-            ParsingError::Multipart(error) => {
-                (ApiErrorCode::InvalidMultipartFile, error.to_string())
-            }
-            ParsingError::MissingPath => (
-                ApiErrorCode::InvalidMultipartFile,
-                "expected the multipart data to contains a field named 'path'".into(),
-            ),
-            ParsingError::MissingFile => (
-                ApiErrorCode::InvalidMultipartFile,
-                "expected the multipart data to contains a field named 'file'".into(),
-            ),
-        };
-
-        Self::failure(api_error_code, &error_message)
-    }
+    parsing_results.map(|_| ApiResponse::success_with_status_code(StatusCode::CREATED, ()))
 }
 
 #[derive(Debug)]
@@ -122,7 +80,7 @@ struct ParsingResults {
 }
 
 impl ParsingResults {
-    async fn parse(temp_file: &mut File, mut multipart: Multipart) -> Result<Self, ParsingError> {
+    async fn parse(temp_file: &mut File, mut multipart: Multipart) -> Result<Self> {
         let mut parsed_path = None;
 
         let mut file_was_present = false;
@@ -149,14 +107,14 @@ impl ParsingResults {
         }
 
         if !file_was_present {
-            return Err(ParsingError::MissingFile);
+            return Err(Error::MultipartMissingField("file".into()));
         }
 
         let hash_md5 = hex::encode(hasher_md5.finalize());
         let hash_sha256 = hex::encode(hasher_sha256.finalize());
 
         Ok(Self {
-            path_storage: parsed_path.ok_or(ParsingError::MissingPath)?,
+            path_storage: parsed_path.ok_or(Error::MultipartMissingField("path".into()))?,
             hash_md5,
             hash_sha256,
         })

@@ -4,7 +4,7 @@ use axum::{extract::multipart::MultipartError, http::StatusCode, response::IntoR
 use serde::Serialize;
 use utoipa::ToSchema;
 
-
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -70,6 +70,8 @@ impl<T> ApiResponse<T> {
     }
 }
 
+pub type ApiResult<T> = Result<ApiResponse<T>>;
+
 impl<T> From<Error> for ApiResponse<T> {
     fn from(error: Error) -> Self {
         let (status_code, error_code, error_message) = match error {
@@ -102,5 +104,11 @@ impl<T> From<Error> for ApiResponse<T> {
                 error_message,
             }),
         }
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        ApiResponse::<()>::from(self).into_response()
     }
 }
