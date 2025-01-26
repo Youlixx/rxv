@@ -3,8 +3,23 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 #[derive(Serialize, ToSchema)]
+pub enum ApiErrorCode {
+    ServerIO,
+    InvalidMultipartFile,
+}
+
+impl ApiErrorCode {
+    pub fn get_status_code(&self) -> StatusCode {
+        match self {
+            ApiErrorCode::ServerIO => StatusCode::INTERNAL_SERVER_ERROR,
+            ApiErrorCode::InvalidMultipartFile => StatusCode::BAD_REQUEST,
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema)]
 pub struct ApiError {
-    api_error_code: u8,
+    api_error_code: ApiErrorCode,
     error_message: String,
 }
 
@@ -26,6 +41,24 @@ where
 {
     fn into_response(self) -> axum::response::Response {
         (self.status_code, Json(self.data)).into_response()
+    }
+}
+
+impl<T> From<Result<T, (StatusCode, ApiError)>> for ApiResponse<T>
+where
+    T: Serialize + ToSchema,
+{
+    fn from(value: Result<T, (StatusCode, ApiError)>) -> Self {
+        match value {
+            Ok(value) => Self {
+                status_code: StatusCode::OK,
+                data: ApiResponseData::Success(value),
+            },
+            Err((status_code, error)) => Self {
+                status_code,
+                data: ApiResponseData::Failure(error),
+            },
+        }
     }
 }
 
@@ -62,9 +95,9 @@ where
         }
     }
 
-    pub fn failure(status_code: StatusCode, api_error_code: u8, error_message: &str) -> Self {
+    pub fn failure(api_error_code: ApiErrorCode, error_message: &str) -> Self {
         Self {
-            status_code,
+            status_code: api_error_code.get_status_code(),
             data: ApiResponseData::Failure(ApiError {
                 api_error_code,
                 error_message: error_message.to_string(),
