@@ -12,6 +12,12 @@ pub enum Error {
     #[error("io related error")]
     ServerIo(#[from] io::Error),
 
+    #[error("SQL related error")]
+    Sql(#[from] sqlx::Error),
+
+    #[error("invalid timestamp format")]
+    TimestampParseError(#[from] chrono::ParseError),
+
     #[error("multipart related error")]
     Multipart(#[from] MultipartError),
 
@@ -25,8 +31,10 @@ pub enum Error {
 mod error_code {
     pub type ErrorCode = u8;
     pub const API_SERVER_SIDE_IO_ERROR: ErrorCode = 0;
-    pub const API_MALFORMED_MULTIPART_ERROR: ErrorCode = 1;
-    pub const API_MULTIPART_MISSING_FIELD_ERROR: ErrorCode = 2;
+    pub const API_SQL_TRANSACTION_ERROR: ErrorCode = 1;
+    pub const API_TIMESTAMP_PARSE_ERROR: ErrorCode = 2;
+    pub const API_MALFORMED_MULTIPART_ERROR: ErrorCode = 3;
+    pub const API_MULTIPART_MISSING_FIELD_ERROR: ErrorCode = 4;
     pub const API_UNKNOWN_ERROR: ErrorCode = ErrorCode::MAX;
 }
 
@@ -78,7 +86,17 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::ServerIo(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 error_code::API_SERVER_SIDE_IO_ERROR,
-                error.to_string(),
+                format!("a server-side IO error occurred: {}", error.to_string()),
+            ),
+            Error::Sql(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error_code::API_SQL_TRANSACTION_ERROR,
+                format!("a server-side SQL error occurred: {}", error.to_string())
+            ),
+            Error::TimestampParseError(error) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                error_code::API_TIMESTAMP_PARSE_ERROR,
+                format!("the given timestamp is not a valid rfc3339 timestamp: {}", error.to_string())
             ),
             Error::Multipart(error) => (
                 StatusCode::BAD_REQUEST,
@@ -93,7 +111,7 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::Unknown(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 error_code::API_UNKNOWN_ERROR,
-                error.to_string()
+                format!("unknown error: {}", error.to_string())
             )
         };
 
