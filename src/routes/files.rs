@@ -60,7 +60,7 @@ async fn upload_file(State(state): State<AppState>, multipart: Multipart) -> Api
                 &parsing_results.hash_md5,
                 &parsing_results.hash_sha256,
             )
-            .await;
+            .await?;
     }
 
     if let Err(error) = remove_file(path_temp_file).await {

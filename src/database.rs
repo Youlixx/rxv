@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
+use chrono::Utc;
 use sqlx::SqlitePool;
 use tokio::fs;
 
-use crate::error::Result;
+use crate::response::Result;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -45,9 +46,9 @@ impl AppState {
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 original_file_name TEXT NOT NULL,
-                size INTEGER UNIQUE NOT NULL,
+                size INTEGER NOT NULL,
                 md5_hash TEXT NOT NULL,
-                sha256_hash TEXT NOT NULL,
+                sha256_hash TEXT UNIQUE NOT NULL,
                 upload_date TEXT NOT NULL
             )
             ",
@@ -76,5 +77,77 @@ impl AppState {
             database,
             path_files,
         })
+    }
+
+    pub async fn add_new_file_to_storage(
+        &self,
+        path_storage: impl AsRef<Path>,
+        path_temp_file: impl AsRef<Path>,
+        hash_md5: &str,
+        hash_sha256: &str,
+    ) -> Result<()> {
+        // TODO check if the file exists already in the store first
+        let path_copy = self.path_files.join(hash_sha256);
+
+        // TODO: we must check the validity of the path, because it may
+        // contains stuff like .., probably should canonicalize.
+        let path_storage = path_storage.as_ref().to_string_lossy().to_string();
+        let current_time = Utc::now().to_rfc3339();
+        let mut transaction = self.database.begin().await?;
+
+        sqlx::query!(
+            "
+            UPDATE paths
+            SET valid_until = ?
+            WHERE path = ? AND valid_until IS NULL;
+            ",
+            current_time,
+            path_storage
+        )
+        .execute(&mut *transaction)
+        .await?;
+
+        if !fs::try_exists(&path_copy).await? {
+            fs::copy(path_temp_file, path_copy).await?;
+
+            sqlx::query!(
+                "
+                INSERT INTO files (original_file_name, size, md5_hash, sha256_hash, upload_date)
+                VALUES (?, ?, ?, ?, ?)
+                ",
+                "placeholder",
+                1000,
+                hash_md5,
+                hash_sha256,
+                current_time
+            )
+            .execute(&mut *transaction)
+            .await?;
+        };
+
+        let file_id = sqlx::query!(
+            "
+            SELECT id FROM files WHERE sha256_hash = ?;
+            ",
+            hash_sha256
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+
+        sqlx::query!(
+            "
+            INSERT INTO paths (file_id, path, valid_since, valid_until)
+            VALUES (?, ?, ?, NULL);
+            ",
+            file_id.id,
+            path_storage,
+            current_time
+        )
+        .execute(&mut *transaction)
+        .await?;
+
+        transaction.commit().await?;
+
+        Ok(())
     }
 }
