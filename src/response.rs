@@ -1,27 +1,28 @@
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
+use utoipa::ToSchema;
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct ApiError {
     api_error_code: u8,
     error_message: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(tag = "status")]
-enum ApiResponseData<T: Serialize> {
+enum ApiResponseData<T: Serialize + ToSchema> {
     Success(T),
     Failure(ApiError),
 }
 
-pub struct ApiResponse<T: Serialize> {
+pub struct ApiResponse<T: Serialize + ToSchema> {
     status_code: StatusCode,
     data: ApiResponseData<T>,
 }
 
 impl<T> IntoResponse for ApiResponse<T>
 where
-    T: Serialize,
+    T: Serialize + ToSchema,
 {
     fn into_response(self) -> axum::response::Response {
         (self.status_code, Json(self.data)).into_response()
@@ -30,7 +31,7 @@ where
 
 impl<T> From<Result<(StatusCode, T), (StatusCode, ApiError)>> for ApiResponse<T>
 where
-    T: Serialize,
+    T: Serialize + ToSchema,
 {
     fn from(value: Result<(StatusCode, T), (StatusCode, ApiError)>) -> Self {
         match value {
@@ -48,7 +49,7 @@ where
 
 impl<T> ApiResponse<T>
 where
-    T: Serialize,
+    T: Serialize + ToSchema,
 {
     pub fn success(data: T) -> Self {
         ApiResponse::success_with_status_code(StatusCode::OK, data)
