@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    mem::ManuallyDrop,
+    path::{Path, PathBuf},
+};
 
 use axum::{
     extract::{Multipart, State},
@@ -29,6 +32,37 @@ struct UploadFileRequest {
     file: String,
 }
 
+struct TempFile {
+    path: PathBuf,
+    file: ManuallyDrop<File>,
+}
+
+impl TempFile {
+    async fn new(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        Ok(Self {
+            file: ManuallyDrop::new(File::create(&path).await?),
+            path,
+        })
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        unsafe {
+            ManuallyDrop::drop(&mut self.file);
+        }
+
+        let path = self.path.clone();
+        tokio::spawn(async move {
+            // TODO we could print out a warning if this fails.
+            remove_file(path)
+                .await
+                .expect("Failed to delete the temp file.");
+        });
+    }
+}
+
 #[utoipa::path(
     post,
     request_body(
@@ -44,34 +78,21 @@ struct UploadFileRequest {
 async fn upload_file(State(state): State<AppState>, multipart: Multipart) -> ApiResult<()> {
     // TODO generate unique path, maybe use uuid to ensure uniqueness.
     let path_temp_file = "/tmp/test";
+    let mut temp_file = TempFile::new(path_temp_file).await?;
+    let parsing_results = ParsingResults::parse(&mut temp_file.file, multipart).await?;
 
-    // TODO it is probably better to write a wrapper around file to auto delete
-    // it when it goes out of scope
-    let parsing_results = {
-        let mut temp_file = File::create(&path_temp_file).await?;
-        ParsingResults::parse(&mut temp_file, multipart).await
-    };
+    state
+        .add_new_file_to_storage(
+            &parsing_results.path_storage,
+            path_temp_file,
+            parsing_results.file_info,
+        )
+        .await?;
 
-    let parsing_results = match parsing_results {
-        Ok(parsing_results) => {
-            state
-                .add_new_file_to_storage(
-                    &parsing_results.path_storage,
-                    path_temp_file,
-                    parsing_results.file_info,
-                )
-                .await
-        }
-        Err(error) => Err(error),
-    };
-
-    if let Err(error) = remove_file(path_temp_file).await {
-        // TODO: we don't really want to throw an error if removing the temp
-        // file failed, maybe raise a warning on the server side?
-        return Err(Error::ServerIo(error));
-    }
-
-    parsing_results.map(|_| ApiResponse::success_with_status_code(StatusCode::CREATED, ()))
+    Ok(ApiResponse::success_with_status_code(
+        StatusCode::CREATED,
+        (),
+    ))
 }
 
 #[derive(Debug)]
