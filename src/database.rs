@@ -1,9 +1,7 @@
-use std::{
-    fs::{self, File},
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
+use tokio::fs;
 
 use crate::error::Result;
 
@@ -25,56 +23,58 @@ impl AppState {
         // TODO check that the path is absolute.
         let path_root = path_root.as_ref();
         if !path_root.exists() {
-            fs::create_dir_all(path_root)?;
+            fs::create_dir_all(path_root).await?;
         }
 
         let path_database = path_root.join(AppState::DATABASE_FILE_NAME);
         if !path_database.exists() {
-            File::create(&path_database)?;
+            fs::File::create(&path_database).await?;
         }
 
         let path_files = path_root.join(AppState::STORAGE_FOLDER_NAME);
         if !path_files.exists() {
-            fs::create_dir(&path_files)?;
+            fs::create_dir(&path_files).await?;
         }
 
         let database_url = String::from("sqlite:") + &path_database.to_string_lossy();
         let database = SqlitePool::connect(&database_url).await?;
+        let mut transaction = database.begin().await?;
 
-        sqlx::query(
+        sqlx::query!(
             "
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                uuid TEXT NOT NULL,
                 original_file_name TEXT NOT NULL,
                 size INTEGER UNIQUE NOT NULL,
                 md5_hash TEXT NOT NULL,
-                sha256_hash TEXT NOT NULL
+                sha256_hash TEXT NOT NULL,
+                upload_date TEXT NOT NULL
             )
             ",
         )
-        .execute(&database)
+        .execute(&mut *transaction)
         .await?;
 
-        sqlx::query(
+        sqlx::query!(
             "
             CREATE TABLE IF NOT EXISTS paths (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 file_id INTEGER NOT NULL,
                 path TEXT NOT NULL,
-                date TEXT NOT NULL,
+                valid_since TEXT NOT NULL,
+                valid_until TEXT,
                 FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
             )
             ",
         )
-        .execute(&database)
+        .execute(&mut *transaction)
         .await?;
+
+        transaction.commit().await?;
 
         Ok(Self {
             database,
             path_files,
         })
     }
-
-    // pub async fn upload_file()
 }
