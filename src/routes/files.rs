@@ -4,7 +4,6 @@ use axum::{
     extract::{multipart::MultipartError, Multipart, State},
     http::StatusCode,
 };
-use serde::Serialize;
 use tokio::{fs::remove_file, fs::File, io::AsyncWriteExt};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -85,12 +84,9 @@ pub enum ParsingError {
     MissingPath,
 }
 
-impl<T> Into<ApiResponse<T>> for ParsingError
-where
-    T: Serialize + ToSchema,
-{
-    fn into(self) -> ApiResponse<T> {
-        let (api_error_code, error_message) = match self {
+impl<T> From<ParsingError> for ApiResponse<T> {
+    fn from(value: ParsingError) -> Self {
+        let (api_error_code, error_message) = match value {
             ParsingError::Io(error) => (ApiErrorCode::ServerIO, error.to_string()),
             ParsingError::Multipart(error) => {
                 (ApiErrorCode::InvalidMultipartFile, error.to_string())
@@ -101,7 +97,7 @@ where
             ),
         };
 
-        ApiResponse::failure(api_error_code, &error_message)
+        Self::failure(api_error_code, &error_message)
     }
 }
 
