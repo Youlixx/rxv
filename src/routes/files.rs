@@ -1,6 +1,5 @@
 use std::{
-    mem::ManuallyDrop,
-    path::{Path, PathBuf},
+    io, mem::ManuallyDrop, path::{Path, PathBuf}
 };
 
 use axum::{
@@ -45,6 +44,10 @@ impl TempFile {
             path,
         })
     }
+
+    async fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.file.write_all(buf).await
+    }
 }
 
 impl Drop for TempFile {
@@ -63,43 +66,6 @@ impl Drop for TempFile {
     }
 }
 
-#[utoipa::path(
-    post,
-    request_body(
-        content = inline(UploadFileRequest),
-        content_type = "multipart/form-data"
-    ),
-    path = "/",
-    tag = "files",
-    responses(
-        (status = 201, description = "The file was successfully uploaded")
-    )
-)]
-async fn upload_file(State(state): State<AppState>, multipart: Multipart) -> ApiResult<()> {
-    // TODO generate unique path, maybe use uuid to ensure uniqueness.
-    let path_temp_file = "/tmp/test";
-    let mut temp_file = TempFile::new(path_temp_file).await?;
-    let parsing_results = ParsingResults::parse(&mut temp_file.file, multipart).await?;
-
-    state
-        .add_new_file_to_storage(
-            &parsing_results.path_storage,
-            path_temp_file,
-            parsing_results.file_info,
-        )
-        .await?;
-
-    Ok(ApiResponse::success_with_status_code(
-        StatusCode::CREATED,
-        (),
-    ))
-}
-
-#[derive(Debug)]
-struct ParsingResults {
-    path_storage: PathBuf,
-    file_info: FileInfo,
-}
 
 #[derive(Default)]
 struct FileInfoBuilder {
@@ -140,49 +106,72 @@ impl FileInfoBuilder {
     }
 }
 
-impl ParsingResults {
-    async fn parse(temp_file: &mut File, mut multipart: Multipart) -> Result<Self> {
-        let mut parsed_path = None;
+#[utoipa::path(
+    post,
+    request_body(
+        content = inline(UploadFileRequest),
+        content_type = "multipart/form-data"
+    ),
+    path = "/",
+    tag = "files",
+    responses(
+        (status = 201, description = "The file was successfully uploaded")
+    )
+)]
+async fn upload_file(State(state): State<AppState>, mut multipart: Multipart) -> ApiResult<()> {
+    // TODO generate unique path, maybe use uuid to ensure uniqueness.
+    let path_temp_file = "/tmp/test";
+    let mut temp_file = TempFile::new(path_temp_file).await?;
+    // let parsing_results = ParsingResults::parse(&mut temp_file.file, multipart).await?;
 
-        let mut file_info_builder = FileInfoBuilder::new();
-        let mut hasher_md5 = Md5::new();
-        let mut hasher_sha256 = Sha256::new();
+    let mut parsed_path = None;
 
-        while let Some(mut field) = multipart.next_field().await? {
-            match field.name() {
-                Some("path") => {
-                    parsed_path = Some(PathBuf::from(field.text().await?));
-                }
-                Some("file") => {
-                    let mut size_in_bytes = 0;
+    let mut file_info_builder = FileInfoBuilder::new();
+    let mut hasher_md5 = Md5::new();
+    let mut hasher_sha256 = Sha256::new();
 
-                    while let Some(chunk) = field.chunk().await? {
-                        temp_file.write_all(&chunk).await?;
-
-                        size_in_bytes += chunk.len();
-                        hasher_sha256.update(&chunk);
-                        hasher_md5.update(chunk);
-                    }
-
-                    file_info_builder.size_in_bytes(size_in_bytes as i64);
-
-                    if let Some(original_name) = field.file_name() {
-                        file_info_builder.original_name(original_name);
-                    }
-                }
-                _ => (),
+    while let Some(mut field) = multipart.next_field().await? {
+        match field.name() {
+            Some("path") => {
+                parsed_path = Some(PathBuf::from(field.text().await?));
             }
+            Some("file") => {
+                let mut size_in_bytes = 0;
+
+                while let Some(chunk) = field.chunk().await? {
+                    temp_file.write_all(&chunk).await?;
+
+                    size_in_bytes += chunk.len();
+                    hasher_sha256.update(&chunk);
+                    hasher_md5.update(chunk);
+                }
+
+                file_info_builder.size_in_bytes(size_in_bytes as i64);
+
+                if let Some(original_name) = field.file_name() {
+                    file_info_builder.original_name(original_name);
+                }
+            }
+            _ => (),
         }
+    }
 
-        let hash_md5 = hex::encode(hasher_md5.finalize());
-        let hash_sha256 = hex::encode(hasher_sha256.finalize());
-        file_info_builder.hashes(hash_md5, hash_sha256);
+    let hash_md5 = hex::encode(hasher_md5.finalize());
+    let hash_sha256 = hex::encode(hasher_sha256.finalize());
+    file_info_builder.hashes(hash_md5, hash_sha256);
 
-        Ok(Self {
-            path_storage: parsed_path.ok_or(Error::MultipartMissingField("path".into()))?,
-            file_info: file_info_builder
+    state
+        .add_new_file_to_storage(
+            &parsed_path.ok_or(Error::MultipartMissingField("path".into()))?,
+            path_temp_file,
+            file_info_builder
                 .build()
                 .ok_or(Error::MultipartMissingField("file".into()))?,
-        })
-    }
+        )
+        .await?;
+
+    Ok(ApiResponse::success_with_status_code(
+        StatusCode::CREATED,
+        (),
+    ))
 }
