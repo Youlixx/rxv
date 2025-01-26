@@ -78,16 +78,25 @@ impl AppState {
             path_files,
         })
     }
+}
 
+#[derive(Debug)]
+pub struct FileInfo {
+    pub original_name: String,
+    pub size_in_bytes: i64,
+    pub hash_md5: String,
+    pub hash_sha256: String
+}
+
+impl AppState {
     pub async fn add_new_file_to_storage(
         &self,
         path_storage: impl AsRef<Path>,
         path_temp_file: impl AsRef<Path>,
-        hash_md5: &str,
-        hash_sha256: &str,
+        file_info: FileInfo,
     ) -> Result<()> {
         // TODO check if the file exists already in the store first
-        let path_copy = self.path_files.join(hash_sha256);
+        let path_copy = self.path_files.join(&file_info.hash_sha256);
 
         // TODO: we must check the validity of the path, because it may
         // contains stuff like .., probably should canonicalize.
@@ -115,10 +124,10 @@ impl AppState {
                 INSERT INTO files (original_file_name, size, md5_hash, sha256_hash, upload_date)
                 VALUES (?, ?, ?, ?, ?)
                 ",
-                "placeholder",
-                1000,
-                hash_md5,
-                hash_sha256,
+                file_info.original_name,
+                file_info.size_in_bytes,
+                file_info.hash_md5,
+                file_info.hash_sha256,
                 current_time
             )
             .execute(&mut *transaction)
@@ -129,7 +138,7 @@ impl AppState {
             "
             SELECT id FROM files WHERE sha256_hash = ?;
             ",
-            hash_sha256
+            file_info.hash_sha256
         )
         .fetch_one(&mut *transaction)
         .await?;
