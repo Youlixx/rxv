@@ -1,36 +1,49 @@
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use std::io;
+
+use axum::{extract::multipart::MultipartError, http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-#[derive(Serialize, ToSchema)]
-pub enum ApiErrorCode {
-    ServerIO,
-    InvalidMultipartFile,
+
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("io related error")]
+    ServerIo(#[from] io::Error),
+
+    #[error("multipart related error")]
+    Multipart(#[from] MultipartError),
+
+    #[error("multipart missing a field")]
+    MultipartMissingField(String),
+
+    #[error("unknown error: {0}")]
+    Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl ApiErrorCode {
-    pub fn get_status_code(&self) -> StatusCode {
-        match self {
-            ApiErrorCode::ServerIO => StatusCode::INTERNAL_SERVER_ERROR,
-            ApiErrorCode::InvalidMultipartFile => StatusCode::BAD_REQUEST,
-        }
-    }
+mod error_code {
+    pub type ErrorCode = u8;
+    pub const API_SERVER_SIDE_IO_ERROR: ErrorCode = 0;
+    pub const API_MALFORMED_MULTIPART_ERROR: ErrorCode = 1;
+    pub const API_MULTIPART_MISSING_FIELD_ERROR: ErrorCode = 2;
+    pub const API_UNKNOWN_ERROR: ErrorCode = ErrorCode::MAX;
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct ApiError {
-    api_error_code: ApiErrorCode,
+    api_error_code: error_code::ErrorCode,
     error_message: String,
 }
 
 #[derive(Serialize, ToSchema)]
 #[serde(tag = "status")]
-enum ApiResponseData<T: Serialize + ToSchema> {
+enum ApiResponseData<T> {
     Success(T),
     Failure(ApiError),
 }
 
-pub struct ApiResponse<T: Serialize + ToSchema> {
+pub struct ApiResponse<T> {
     status_code: StatusCode,
     data: ApiResponseData<T>,
 }
@@ -44,46 +57,7 @@ where
     }
 }
 
-impl<T> From<Result<T, (StatusCode, ApiError)>> for ApiResponse<T>
-where
-    T: Serialize + ToSchema,
-{
-    fn from(value: Result<T, (StatusCode, ApiError)>) -> Self {
-        match value {
-            Ok(value) => Self {
-                status_code: StatusCode::OK,
-                data: ApiResponseData::Success(value),
-            },
-            Err((status_code, error)) => Self {
-                status_code,
-                data: ApiResponseData::Failure(error),
-            },
-        }
-    }
-}
-
-impl<T> From<Result<(StatusCode, T), (StatusCode, ApiError)>> for ApiResponse<T>
-where
-    T: Serialize + ToSchema,
-{
-    fn from(value: Result<(StatusCode, T), (StatusCode, ApiError)>) -> Self {
-        match value {
-            Ok((status_code, value)) => Self {
-                status_code,
-                data: ApiResponseData::Success(value),
-            },
-            Err((status_code, error)) => Self {
-                status_code,
-                data: ApiResponseData::Failure(error),
-            },
-        }
-    }
-}
-
-impl<T> ApiResponse<T>
-where
-    T: Serialize + ToSchema,
-{
+impl<T> ApiResponse<T> {
     pub fn success(data: T) -> Self {
         ApiResponse::success_with_status_code(StatusCode::OK, data)
     }
@@ -94,13 +68,38 @@ where
             data: ApiResponseData::Success(data),
         }
     }
+}
 
-    pub fn failure(api_error_code: ApiErrorCode, error_message: &str) -> Self {
-        Self {
-            status_code: api_error_code.get_status_code(),
+impl<T> From<Error> for ApiResponse<T> {
+    fn from(error: Error) -> Self {
+        let (status_code, error_code, error_message) = match error {
+            Error::ServerIo(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error_code::API_SERVER_SIDE_IO_ERROR,
+                error.to_string(),
+            ),
+            Error::Multipart(error) => (
+                StatusCode::BAD_REQUEST,
+                error_code::API_MALFORMED_MULTIPART_ERROR,
+                error.to_string(),
+            ),
+            Error::MultipartMissingField(field) => (
+                StatusCode::BAD_REQUEST,
+                error_code::API_MULTIPART_MISSING_FIELD_ERROR,
+                format!("the field '{}' is missing from the multipart", field),
+            ),
+            Error::Unknown(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error_code::API_UNKNOWN_ERROR,
+                error.to_string()
+            )
+        };
+
+        ApiResponse {
+            status_code,
             data: ApiResponseData::Failure(ApiError {
-                api_error_code,
-                error_message: error_message.to_string(),
+                api_error_code: error_code,
+                error_message,
             }),
         }
     }
