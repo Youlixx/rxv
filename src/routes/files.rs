@@ -1,26 +1,54 @@
 use std::{
-    io, mem::ManuallyDrop, path::{Path, PathBuf}
+    io,
+    mem::ManuallyDrop,
+    path::{Path, PathBuf},
 };
 
 use axum::{
     extract::{Multipart, State},
     http::StatusCode,
+    Json,
 };
+use chrono::{DateTime, Utc};
 use md5::Md5;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::{fs::remove_file, fs::File, io::AsyncWriteExt};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    database::{AppState, FileInfo},
+    database::{AppState, FileInfo, FileSystemState},
     response::{ApiResponse, ApiResult, Error, Result},
 };
 
 pub fn router(state: AppState) -> OpenApiRouter {
     OpenApiRouter::new()
         .routes(routes!(upload_file))
+        .routes(routes!(get_filesystem_at))
         .with_state(state)
+}
+
+#[derive(Deserialize, ToSchema)]
+struct GetFilesystem {
+    timestamp: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "files",
+    responses(
+        (status = 200, description = "The filepaths were successfully returned")
+    )
+)]
+async fn get_filesystem_at(
+    State(app): State<AppState>,
+    Json(request): Json<GetFilesystem>,
+) -> ApiResult<FileSystemState> {
+    app.get_filesystem_at(DateTime::parse_from_rfc3339(&request.timestamp)?.with_timezone(&Utc))
+        .await
+        .map(|fs| ApiResponse::success(fs))
 }
 
 #[derive(ToSchema)]
@@ -65,7 +93,6 @@ impl Drop for TempFile {
         });
     }
 }
-
 
 #[derive(Default)]
 struct FileInfoBuilder {
@@ -112,7 +139,7 @@ impl FileInfoBuilder {
         content = inline(UploadFileRequest),
         content_type = "multipart/form-data"
     ),
-    path = "/",
+    path = "/upload",
     tag = "files",
     responses(
         (status = 201, description = "The file was successfully uploaded")

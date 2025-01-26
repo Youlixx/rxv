@@ -1,8 +1,11 @@
-use std::path::{Path, PathBuf};
+use core::time;
+use std::{collections::HashMap, path::{Path, PathBuf}};
 
-use chrono::Utc;
+use chrono::{DateTime, TimeZone, Utc};
+use serde::Serialize;
 use sqlx::SqlitePool;
 use tokio::fs;
+use utoipa::ToSchema;
 
 use crate::response::Result;
 
@@ -80,12 +83,43 @@ impl AppState {
     }
 }
 
+// TODO might be good to also give file info, like HashMap<String, FileInfo>
+#[derive(Serialize, ToSchema)]
+pub struct FileSystemState {
+    paths: HashMap<String, i64>
+}
+
+impl AppState {
+    pub async fn get_filesystem_at<T>(&self, timestamp: DateTime<T>) -> Result<FileSystemState>
+    where
+        T: TimeZone,
+    {
+        let timestamp = timestamp.to_rfc3339();
+
+        let paths = sqlx::query!(
+            "
+            SELECT path, file_id FROM paths
+            WHERE ? >= valid_since AND ? < COALESCE(valid_until, '9999-12-31T23:59:59Z');
+            ",
+            timestamp,
+            timestamp
+        )
+        .fetch_all(&self.database)
+        .await?
+        .into_iter()
+        .map(|record| (record.path, record.file_id))
+        .collect();
+
+        Ok(FileSystemState { paths })
+    }
+}
+
 #[derive(Debug)]
 pub struct FileInfo {
     pub original_name: String,
     pub size_in_bytes: i64,
     pub hash_md5: String,
-    pub hash_sha256: String
+    pub hash_sha256: String,
 }
 
 impl AppState {
@@ -95,7 +129,6 @@ impl AppState {
         path_temp_file: impl AsRef<Path>,
         file_info: FileInfo,
     ) -> Result<()> {
-        // TODO check if the file exists already in the store first
         let path_copy = self.path_files.join(&file_info.hash_sha256);
 
         // TODO: we must check the validity of the path, because it may
@@ -104,6 +137,13 @@ impl AppState {
         let current_time = Utc::now().to_rfc3339();
         let mut transaction = self.database.begin().await?;
 
+        // TODO: if the given path points to the exact same file, then we
+        // should not update the path table, or it will lead to some stuff like
+        // file_id: 1, valid_since: 10, valid_until: 40
+        // file_id: 1, valid_since: 40, valid_until: None
+        // which should be merged into
+        // file_id: 1, valid_since: 10, valid_until: None
+        // i.e. do nothing on the paths table.
         sqlx::query!(
             "
             UPDATE paths
