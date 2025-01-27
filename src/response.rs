@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, path::PathBuf};
 
 use axum::{extract::multipart::MultipartError, http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
@@ -24,6 +24,9 @@ pub enum Error {
     #[error("multipart missing a field")]
     MultipartMissingField(String),
 
+    #[error("no file at the given path")]
+    FileNotFound(PathBuf),
+
     #[error("unknown error: {0}")]
     Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
@@ -35,6 +38,7 @@ mod error_code {
     pub const API_TIMESTAMP_PARSE_ERROR: ErrorCode = 2;
     pub const API_MALFORMED_MULTIPART_ERROR: ErrorCode = 3;
     pub const API_MULTIPART_MISSING_FIELD_ERROR: ErrorCode = 4;
+    pub const API_MISSING_FILE_ERROR: ErrorCode = 5;
     pub const API_UNKNOWN_ERROR: ErrorCode = ErrorCode::MAX;
 }
 
@@ -91,12 +95,15 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::Sql(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 error_code::API_SQL_TRANSACTION_ERROR,
-                format!("a server-side SQL error occurred: {}", error.to_string())
+                format!("a server-side SQL error occurred: {}", error.to_string()),
             ),
             Error::TimestampParseError(error) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 error_code::API_TIMESTAMP_PARSE_ERROR,
-                format!("the given timestamp is not a valid rfc3339 timestamp: {}", error.to_string())
+                format!(
+                    "the given timestamp is not a valid rfc3339 timestamp: {}",
+                    error.to_string()
+                ),
             ),
             Error::Multipart(error) => (
                 StatusCode::BAD_REQUEST,
@@ -108,11 +115,19 @@ impl<T> From<Error> for ApiResponse<T> {
                 error_code::API_MULTIPART_MISSING_FIELD_ERROR,
                 format!("the field '{}' is missing from the multipart", field),
             ),
+            Error::FileNotFound(path) => (
+                StatusCode::NOT_FOUND,
+                error_code::API_MISSING_FILE_ERROR,
+                format!(
+                    "the path '{}' does not point to a live file",
+                    path.to_string_lossy()
+                ),
+            ),
             Error::Unknown(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 error_code::API_UNKNOWN_ERROR,
-                format!("unknown error: {}", error.to_string())
-            )
+                format!("unknown error: {}", error.to_string()),
+            ),
         };
 
         ApiResponse {
