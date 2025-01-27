@@ -5,20 +5,24 @@ use std::{
 };
 
 use axum::{
-    extract::{Multipart, Path as ExtractPath, State},
-    http::StatusCode,
-    Json,
+    body::Body,
+    extract::{Multipart, Path as ExtractPath, Query, State},
+    http::{header, Response, StatusCode},
 };
 use chrono::{DateTime, Utc};
 use md5::Md5;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use tokio::{fs::remove_file, fs::File, io::AsyncWriteExt};
+use tokio::{
+    fs::{remove_file, File},
+    io::AsyncWriteExt,
+};
+use tokio_util::io::ReaderStream;
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    database::{AppState, FileInfo, FileSystemState},
+    database::{AppState, FileInfo, TimePoint},
     response::{ApiResponse, ApiResult, Error, Result},
 };
 
@@ -30,8 +34,23 @@ pub fn router(state: AppState) -> OpenApiRouter {
 }
 
 #[derive(Deserialize, ToSchema)]
-struct GetFilesystem {
-    timestamp: String,
+struct RequestTimePoint {
+    timestamp: Option<String>,
+    delta: Option<String>,
+}
+
+impl TryFrom<RequestTimePoint> for TimePoint {
+    type Error = Error;
+
+    fn try_from(value: RequestTimePoint) -> std::result::Result<Self, Self::Error> {
+        Ok(match (value.timestamp, value.delta) {
+            (Some(timestamp), _) => {
+                TimePoint::Absolute(DateTime::parse_from_rfc3339(&timestamp)?.with_timezone(&Utc))
+            }
+            (None, Some(delta)) => todo!(),
+            _ => TimePoint::Absolute(Utc::now()),
+        })
+    }
 }
 
 #[utoipa::path(
@@ -44,14 +63,19 @@ struct GetFilesystem {
 )]
 async fn get_filesystem_at(
     State(app): State<AppState>,
-    ExtractPath(path): ExtractPath<String>
-) -> ApiResult<FileSystemState> {
-    dbg!(path);
-    todo!();
-    // Ok(())
-    // app.get_filesystem_at(DateTime::parse_from_rfc3339(&request.timestamp)?.with_timezone(&Utc))
-    //     .await
-    //     .map(|fs| ApiResponse::success(fs))
+    ExtractPath(path): ExtractPath<String>,
+    Query(query): Query<RequestTimePoint>,
+) -> Result<Response<Body>> {
+    let path_file = app.download_from_storage(path, query.try_into()?).await?;
+    let file = tokio::fs::File::open(path_file).await?;
+
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .body(Body::from_stream(ReaderStream::new(file)))
+        .expect("Failed to build response");
+
+    Ok(response)
 }
 
 #[derive(ToSchema)]
@@ -150,7 +174,7 @@ impl FileInfoBuilder {
 async fn upload_file(
     State(state): State<AppState>,
     ExtractPath(path): ExtractPath<String>,
-    mut multipart: Multipart
+    mut multipart: Multipart,
 ) -> ApiResult<()> {
     // TODO generate unique path, maybe use uuid to ensure uniqueness.
     let path_temp_file = "/tmp/test";
