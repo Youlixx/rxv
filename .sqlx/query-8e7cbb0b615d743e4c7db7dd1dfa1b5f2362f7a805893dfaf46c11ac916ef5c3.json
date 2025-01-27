@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            CREATE TABLE IF NOT EXISTS paths (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                file_id INTEGER NOT NULL,\n                path TEXT NOT NULL,\n                valid_since TEXT NOT NULL,\n                valid_until TEXT,\n                FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "8e7cbb0b615d743e4c7db7dd1dfa1b5f2362f7a805893dfaf46c11ac916ef5c3"
+}

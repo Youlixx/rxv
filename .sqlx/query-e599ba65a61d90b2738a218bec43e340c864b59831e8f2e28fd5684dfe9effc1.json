@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT path, file_id FROM paths\n            WHERE ? >= valid_since AND ? < COALESCE(valid_until, '9999-12-31T23:59:59Z');\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "path",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "file_id",
+        "ordinal": 1,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "e599ba65a61d90b2738a218bec43e340c864b59831e8f2e28fd5684dfe9effc1"
+}
