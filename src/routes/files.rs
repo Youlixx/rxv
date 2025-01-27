@@ -66,16 +66,40 @@ async fn get_filesystem_at(
     ExtractPath(path): ExtractPath<String>,
     Query(query): Query<RequestTimePoint>,
 ) -> Result<Response<Body>> {
-    let path_file = app.download_from_storage(path, query.try_into()?).await?;
-    let file = tokio::fs::File::open(path_file).await?;
+    // TODO do this properly. have some reflection on who should manage the
+    // resource access.
+    let time_point: TimePoint = query.try_into()?;
 
-    let response = Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/octet-stream")
-        .body(Body::from_stream(ReaderStream::new(file)))
-        .expect("Failed to build response");
+    // TODO this shit's ugly...
+    // TODO: remove the expects!
+    if path.ends_with("/") {
+        let path_file = app.download_folder_from_storage(&path, time_point).await?;
 
-    Ok(response)
+        let response = {
+            let file = tokio::fs::File::open(&path_file).await?;
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(Body::from_stream(ReaderStream::new(file)))
+                .expect("Failed to build response")
+        };
+
+        remove_file(path_file).await?;
+
+        Ok(response)
+    } else {
+        let path_file = app.download_file_from_storage(path, time_point).await?;
+        let file = tokio::fs::File::open(path_file).await?;
+
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from_stream(ReaderStream::new(file)))
+            .expect("Failed to build response");
+
+        Ok(response)
+    }
 }
 
 #[derive(ToSchema)]

@@ -1,11 +1,12 @@
 use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
+    collections::HashMap, fs::File, path::{Path, PathBuf}
 };
 
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
+use flate2::{write::GzEncoder, Compression};
 use serde::Serialize;
 use sqlx::SqlitePool;
+use tar::Builder;
 use tokio::fs;
 use utoipa::ToSchema;
 
@@ -131,7 +132,7 @@ impl TimePoint {
 }
 
 impl AppState {
-    pub async fn download_from_storage(
+    pub async fn download_file_from_storage(
         &self,
         path_storage: impl AsRef<Path>,
         time_point: TimePoint,
@@ -152,9 +153,56 @@ impl AppState {
         )
         .fetch_optional(&self.database)
         .await?
-        .ok_or(Error::MissingFile(path_storage))?;
+        .ok_or(Error::FileNotFound(path_storage))?;
 
         Ok(self.path_files.join(file_hash.sha256_hash))
+    }
+
+    pub async fn download_folder_from_storage<P>(
+        &self,
+        path_storage: P,
+        time_point: TimePoint,
+    ) -> Result<PathBuf>
+    where
+        P: AsRef<Path>,
+    {
+        let timestamp = time_point.to_absolute().to_rfc3339();
+        let path_storage = path_storage.as_ref().to_path_buf();
+        let path_string = format!("{}%", path_storage.to_string_lossy());
+
+        // TODO this is terrible :)
+        let path_output_file = PathBuf::from("/tmp/archive.tar.gz");
+        let output_file = File::create(&path_output_file)?;
+        let encoder = GzEncoder::new(output_file, Compression::default());
+        let mut builder = Builder::new(encoder);
+
+        sqlx::query!(
+            "
+            SELECT files.sha256_hash, paths.path FROM files
+            INNER JOIN paths ON files.id == paths.file_id
+            WHERE ? >= paths.valid_since
+                AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
+                AND paths.path LIKE ?;
+            ",
+            timestamp,
+            timestamp,
+            path_string
+        )
+        .fetch_all(&self.database)
+        .await?
+        .into_iter()
+        .map(|record| {
+            let path_storage = self.path_files.join(record.sha256_hash);
+            builder.append_path_with_name(path_storage, record.path)
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        // Should probably return this as a TempFile and implement Deref<W> for
+        // TempFile or something like this. TempFile should probably be generic
+        // over tokio File and std File.
+        builder.into_inner()?.finish()?;
+
+        Ok(path_output_file)
     }
 }
 
