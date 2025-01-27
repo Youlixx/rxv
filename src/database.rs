@@ -1,13 +1,15 @@
-use core::time;
-use std::{collections::HashMap, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, TimeDelta, TimeZone, Utc};
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tokio::fs;
 use utoipa::ToSchema;
 
-use crate::response::Result;
+use crate::response::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -86,7 +88,7 @@ impl AppState {
 // TODO might be good to also give file info, like HashMap<String, FileInfo>
 #[derive(Serialize, ToSchema)]
 pub struct FileSystemState {
-    paths: HashMap<String, i64>
+    paths: HashMap<String, i64>,
 }
 
 impl AppState {
@@ -111,6 +113,48 @@ impl AppState {
         .collect();
 
         Ok(FileSystemState { paths })
+    }
+}
+
+pub enum TimePoint {
+    Absolute(DateTime<Utc>),
+    Relative(TimeDelta),
+}
+
+impl TimePoint {
+    fn to_absolute(self) -> DateTime<Utc> {
+        match self {
+            TimePoint::Absolute(timestamp) => timestamp,
+            TimePoint::Relative(delta) => Utc::now() - delta,
+        }
+    }
+}
+
+impl AppState {
+    pub async fn download_from_storage(
+        &self,
+        path_storage: impl AsRef<Path>,
+        time_point: TimePoint,
+    ) -> Result<PathBuf> {
+        let timestamp = time_point.to_absolute().to_rfc3339();
+        let path_storage = path_storage.as_ref().to_path_buf();
+        let path_string = path_storage.to_string_lossy();
+
+        let file_hash = sqlx::query!(
+            "
+            SELECT files.sha256_hash FROM files
+            INNER JOIN paths ON files.id == paths.file_id
+            WHERE ? >= paths.valid_since AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z') AND paths.path == ?;
+            ",
+            timestamp,
+            timestamp,
+            path_string
+        )
+        .fetch_optional(&self.database)
+        .await?
+        .ok_or(Error::MissingFile(path_storage))?;
+
+        Ok(self.path_files.join(file_hash.sha256_hash))
     }
 }
 
