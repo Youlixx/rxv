@@ -5,7 +5,7 @@ use std::{
 };
 
 use axum::{
-    extract::{Multipart, State},
+    extract::{Multipart, Path as ExtractPath, State},
     http::StatusCode,
     Json,
 };
@@ -35,8 +35,8 @@ struct GetFilesystem {
 }
 
 #[utoipa::path(
-    post,
-    path = "/",
+    get,
+    path = "/{*path}",
     tag = "files",
     responses(
         (status = 200, description = "The filepaths were successfully returned")
@@ -44,17 +44,19 @@ struct GetFilesystem {
 )]
 async fn get_filesystem_at(
     State(app): State<AppState>,
-    Json(request): Json<GetFilesystem>,
+    ExtractPath(path): ExtractPath<String>
 ) -> ApiResult<FileSystemState> {
-    app.get_filesystem_at(DateTime::parse_from_rfc3339(&request.timestamp)?.with_timezone(&Utc))
-        .await
-        .map(|fs| ApiResponse::success(fs))
+    dbg!(path);
+    todo!();
+    // Ok(())
+    // app.get_filesystem_at(DateTime::parse_from_rfc3339(&request.timestamp)?.with_timezone(&Utc))
+    //     .await
+    //     .map(|fs| ApiResponse::success(fs))
 }
 
 #[derive(ToSchema)]
 #[allow(unused)]
 struct UploadFileRequest {
-    path: String,
     #[schema(format = Binary, content_media_type = "application/octet-stream")]
     file: String,
 }
@@ -139,19 +141,20 @@ impl FileInfoBuilder {
         content = inline(UploadFileRequest),
         content_type = "multipart/form-data"
     ),
-    path = "/upload",
+    path = "/{*path}",
     tag = "files",
     responses(
         (status = 201, description = "The file was successfully uploaded")
     )
 )]
-async fn upload_file(State(state): State<AppState>, mut multipart: Multipart) -> ApiResult<()> {
+async fn upload_file(
+    State(state): State<AppState>,
+    ExtractPath(path): ExtractPath<String>,
+    mut multipart: Multipart
+) -> ApiResult<()> {
     // TODO generate unique path, maybe use uuid to ensure uniqueness.
     let path_temp_file = "/tmp/test";
     let mut temp_file = TempFile::new(path_temp_file).await?;
-    // let parsing_results = ParsingResults::parse(&mut temp_file.file, multipart).await?;
-
-    let mut parsed_path = None;
 
     let mut file_info_builder = FileInfoBuilder::new();
     let mut hasher_md5 = Md5::new();
@@ -159,9 +162,6 @@ async fn upload_file(State(state): State<AppState>, mut multipart: Multipart) ->
 
     while let Some(mut field) = multipart.next_field().await? {
         match field.name() {
-            Some("path") => {
-                parsed_path = Some(PathBuf::from(field.text().await?));
-            }
             Some("file") => {
                 let mut size_in_bytes = 0;
 
@@ -189,7 +189,7 @@ async fn upload_file(State(state): State<AppState>, mut multipart: Multipart) ->
 
     state
         .add_new_file_to_storage(
-            &parsed_path.ok_or(Error::MultipartMissingField("path".into()))?,
+            &path,
             path_temp_file,
             file_info_builder
                 .build()
