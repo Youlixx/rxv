@@ -1,5 +1,7 @@
 use std::{
-    collections::HashMap, fs::File, path::{Path, PathBuf}
+    collections::HashMap,
+    fs::File,
+    path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
@@ -222,31 +224,9 @@ impl AppState {
         file_info: FileInfo,
     ) -> Result<()> {
         let path_copy = self.path_files.join(&file_info.hash_sha256);
-
-        // TODO: we must check the validity of the path, because it may
-        // contains stuff like .., probably should canonicalize.
         let path_storage = path_storage.as_ref().to_string_lossy().to_string();
         let current_time = Utc::now().to_rfc3339();
         let mut transaction = self.database.begin().await?;
-
-        // TODO: if the given path points to the exact same file, then we
-        // should not update the path table, or it will lead to some stuff like
-        // file_id: 1, valid_since: 10, valid_until: 40
-        // file_id: 1, valid_since: 40, valid_until: None
-        // which should be merged into
-        // file_id: 1, valid_since: 10, valid_until: None
-        // i.e. do nothing on the paths table.
-        sqlx::query!(
-            "
-            UPDATE paths
-            SET valid_until = ?
-            WHERE path = ? AND valid_until IS NULL;
-            ",
-            current_time,
-            path_storage
-        )
-        .execute(&mut *transaction)
-        .await?;
 
         if !fs::try_exists(&path_copy).await? {
             fs::copy(path_temp_file, path_copy).await?;
@@ -264,15 +244,50 @@ impl AppState {
             )
             .execute(&mut *transaction)
             .await?;
-        };
+        } else {
+            // If a user attempts to create a new path that already exists and
+            // points to the same file, the transaction should be canceled.
+            // This approach prevents the same path from being invalidated and
+            // then revalidated consecutively at the same timestamp.
+            let same_file_with_same_path = sqlx::query!(
+                "
+                SELECT COUNT(paths.id) as count FROM files
+                INNER JOIN paths ON files.id == paths.file_id
+                WHERE paths.valid_until IS NULL
+                    AND paths.path == ?
+                    AND files.sha256_hash = ?;
+                ",
+                path_storage,
+                file_info.hash_sha256
+            )
+            .fetch_one(&mut *transaction)
+            .await?
+            .count;
+
+            if same_file_with_same_path != 0 {
+                transaction.rollback().await?;
+                return Ok(());
+            }
+        }
 
         let file_id = sqlx::query!(
-            "
-            SELECT id FROM files WHERE sha256_hash = ?;
-            ",
+            "SELECT id FROM files WHERE sha256_hash = ?;",
             file_info.hash_sha256
         )
         .fetch_one(&mut *transaction)
+        .await?
+        .id;
+
+        sqlx::query!(
+            "
+            UPDATE paths
+            SET valid_until = ?
+            WHERE path = ? AND valid_until IS NULL;
+            ",
+            current_time,
+            path_storage
+        )
+        .execute(&mut *transaction)
         .await?;
 
         sqlx::query!(
@@ -280,7 +295,7 @@ impl AppState {
             INSERT INTO paths (file_id, path, valid_since, valid_until)
             VALUES (?, ?, ?, NULL);
             ",
-            file_id.id,
+            file_id,
             path_storage,
             current_time
         )
