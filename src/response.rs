@@ -1,6 +1,6 @@
 use std::{io, path::PathBuf};
 
-use axum::{extract::multipart::MultipartError, http::StatusCode, response::IntoResponse, Json};
+use axum::{extract::multipart::MultipartError, http::{self, StatusCode}, response::IntoResponse, Json};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -12,8 +12,14 @@ pub enum Error {
     #[error("io related error")]
     ServerIo(#[from] io::Error),
 
+    #[error("HTTP related error")]
+    Http(#[from] http::Error),
+
     #[error("SQL related error")]
     Sql(#[from] sqlx::Error),
+
+    #[error("tmpfs related error")]
+    TempFile(#[from] async_tempfile::Error),
 
     #[error("invalid timestamp format")]
     TimestampParseError(#[from] chrono::ParseError),
@@ -31,20 +37,23 @@ pub enum Error {
     Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-mod error_code {
-    pub type ErrorCode = u8;
-    pub const API_SERVER_SIDE_IO_ERROR: ErrorCode = 0;
-    pub const API_SQL_TRANSACTION_ERROR: ErrorCode = 1;
-    pub const API_TIMESTAMP_PARSE_ERROR: ErrorCode = 2;
-    pub const API_MALFORMED_MULTIPART_ERROR: ErrorCode = 3;
-    pub const API_MULTIPART_MISSING_FIELD_ERROR: ErrorCode = 4;
-    pub const API_MISSING_FILE_ERROR: ErrorCode = 5;
-    pub const API_UNKNOWN_ERROR: ErrorCode = ErrorCode::MAX;
+#[derive(Serialize, ToSchema)]
+#[repr(u8)]
+enum ApiErrorCode {
+    ServerSideIoError = 0,
+    ServerSideHttpError,
+    ServerSideSqlError,
+    ServerSideTempFileError,
+    InvalidTimestamp,
+    MalformedMultipart,
+    MultipartMissingField,
+    FileNotFound,
+    UnknownError = u8::MAX
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct ApiError {
-    api_error_code: error_code::ErrorCode,
+    api_error_code: ApiErrorCode,
     error_message: String,
 }
 
@@ -89,35 +98,48 @@ impl<T> From<Error> for ApiResponse<T> {
         let (status_code, error_code, error_message) = match error {
             Error::ServerIo(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                error_code::API_SERVER_SIDE_IO_ERROR,
-                format!("a server-side IO error occurred: {}", error.to_string()),
+                ApiErrorCode::ServerSideIoError,
+                format!("a server-side IO error occurred: {}", error),
+            ),
+            Error::Http(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiErrorCode::ServerSideHttpError,
+                format!("a server-side HTTP error occured: {}", error),
             ),
             Error::Sql(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                error_code::API_SQL_TRANSACTION_ERROR,
-                format!("a server-side SQL error occurred: {}", error.to_string()),
+                ApiErrorCode::ServerSideSqlError,
+                format!("a server-side SQL error occurred: {}", error),
+            ),
+            Error::TempFile(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiErrorCode::ServerSideTempFileError,
+                format!(
+                    "a server-side temp file error occured: {}",
+                    error
+                ),
             ),
             Error::TimestampParseError(error) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                error_code::API_TIMESTAMP_PARSE_ERROR,
+                ApiErrorCode::InvalidTimestamp,
                 format!(
                     "the given timestamp is not a valid rfc3339 timestamp: {}",
-                    error.to_string()
+                    error
                 ),
             ),
             Error::Multipart(error) => (
                 StatusCode::BAD_REQUEST,
-                error_code::API_MALFORMED_MULTIPART_ERROR,
+                ApiErrorCode::MalformedMultipart,
                 error.to_string(),
             ),
             Error::MultipartMissingField(field) => (
                 StatusCode::BAD_REQUEST,
-                error_code::API_MULTIPART_MISSING_FIELD_ERROR,
+                ApiErrorCode::MultipartMissingField,
                 format!("the field '{}' is missing from the multipart", field),
             ),
             Error::FileNotFound(path) => (
                 StatusCode::NOT_FOUND,
-                error_code::API_MISSING_FILE_ERROR,
+                ApiErrorCode::FileNotFound,
                 format!(
                     "the path '{}' does not point to a live file",
                     path.to_string_lossy()
@@ -125,8 +147,8 @@ impl<T> From<Error> for ApiResponse<T> {
             ),
             Error::Unknown(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                error_code::API_UNKNOWN_ERROR,
-                format!("unknown error: {}", error.to_string()),
+                ApiErrorCode::UnknownError,
+                format!("unknown error: {}", error),
             ),
         };
 
