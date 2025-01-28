@@ -74,7 +74,6 @@ async fn get_filesystem_at(
             let mut builder = Builder::new(buffer);
 
             for (absolute_local_path, archive_path) in files {
-                println!("Body::from_stream = {:#?}", &absolute_local_path);
                 let mut file = File::open(absolute_local_path).await?;
                 builder.append_file(archive_path, &mut file).await?;
             }
