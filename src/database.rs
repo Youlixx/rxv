@@ -217,10 +217,16 @@ pub struct FileInfo {
 }
 
 impl AppState {
+    /// Asynchronously adds a new file to storage.
+    ///
+    /// This function takes a path to physical file, the path of the new file
+    /// relative to the storage and information about the file, and adds the
+    /// file to the storage. Once this function completes, the original file
+    /// may be deleted.
     pub async fn add_new_file_to_storage(
         &self,
+        path_file: impl AsRef<Path>,
         path_storage: impl AsRef<Path>,
-        path_temp_file: impl AsRef<Path>,
         file_info: FileInfo,
     ) -> Result<()> {
         let path_copy = self.path_files.join(&file_info.hash_sha256);
@@ -229,7 +235,7 @@ impl AppState {
         let mut transaction = self.database.begin().await?;
 
         if !fs::try_exists(&path_copy).await? {
-            fs::copy(path_temp_file, path_copy).await?;
+            fs::copy(path_file, path_copy).await?;
 
             sqlx::query!(
                 "
