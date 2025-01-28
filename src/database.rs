@@ -1,18 +1,15 @@
 use std::{
     collections::HashMap,
-    fs::File,
     path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
-use flate2::{write::GzEncoder, Compression};
 use serde::Serialize;
 use sqlx::SqlitePool;
-use tar::Builder;
 use tokio::fs;
 use utoipa::ToSchema;
 
-use crate::response::{Error, Result};
+use crate::response::Result;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -133,78 +130,78 @@ impl TimePoint {
     }
 }
 
+pub enum FileList {
+    None,
+    SingleFile(PathBuf),
+    MultipleFile(Vec<(PathBuf, PathBuf)>),
+}
+
 impl AppState {
-    pub async fn download_file_from_storage(
+    pub async fn get_file_paths(
         &self,
         path_storage: impl AsRef<Path>,
         time_point: TimePoint,
-    ) -> Result<PathBuf> {
+    ) -> Result<FileList> {
         let timestamp = time_point.to_absolute().to_rfc3339();
         let path_storage = path_storage.as_ref().to_path_buf();
         let path_string = path_storage.to_string_lossy();
 
-        let file_hash = sqlx::query!(
-            "
-            SELECT files.sha256_hash FROM files
-            INNER JOIN paths ON files.id == paths.file_id
-            WHERE ? >= paths.valid_since AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z') AND paths.path == ?;
-            ",
-            timestamp,
-            timestamp,
-            path_string
-        )
-        .fetch_optional(&self.database)
-        .await?
-        .ok_or(Error::FileNotFound(path_storage))?;
+        let files = if !path_string.ends_with("/") {
+            let file_hash = sqlx::query!(
+                "
+                SELECT files.sha256_hash FROM files
+                INNER JOIN paths ON files.id == paths.file_id
+                WHERE ? >= paths.valid_since
+                    AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
+                    AND paths.path == ?;
+                ",
+                timestamp,
+                timestamp,
+                path_string
+            )
+            .fetch_optional(&self.database)
+            .await?;
 
-        Ok(self.path_files.join(file_hash.sha256_hash))
-    }
+            match file_hash {
+                Some(file_hash) => {
+                    FileList::SingleFile(self.path_files.join(file_hash.sha256_hash))
+                }
+                None => FileList::None,
+            }
+        } else {
+            let path_string = format!("{}%", path_string);
 
-    pub async fn download_folder_from_storage<P>(
-        &self,
-        path_storage: P,
-        time_point: TimePoint,
-    ) -> Result<PathBuf>
-    where
-        P: AsRef<Path>,
-    {
-        let timestamp = time_point.to_absolute().to_rfc3339();
-        let path_storage = path_storage.as_ref().to_path_buf();
-        let path_string = format!("{}%", path_storage.to_string_lossy());
+            let files = sqlx::query!(
+                "
+                SELECT files.sha256_hash, paths.path FROM files
+                INNER JOIN paths ON files.id == paths.file_id
+                WHERE ? >= paths.valid_since
+                    AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
+                    AND paths.path LIKE ?;
+                ",
+                timestamp,
+                timestamp,
+                path_string
+            )
+            .fetch_all(&self.database)
+            .await?
+            .into_iter()
+            .map(|record| {
+                (
+                    self.path_files.join(record.sha256_hash),
+                    PathBuf::from(record.path),
+                )
+            })
+            .collect::<Vec<_>>();
 
-        // TODO this is terrible :)
-        let path_output_file = PathBuf::from("/tmp/archive.tar.gz");
-        let output_file = File::create(&path_output_file)?;
-        let encoder = GzEncoder::new(output_file, Compression::default());
-        let mut builder = Builder::new(encoder);
+            if files.is_empty() {
+                FileList::None
+            } else {
+                FileList::MultipleFile(files)
+            }
+        };
 
-        sqlx::query!(
-            "
-            SELECT files.sha256_hash, paths.path FROM files
-            INNER JOIN paths ON files.id == paths.file_id
-            WHERE ? >= paths.valid_since
-                AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
-                AND paths.path LIKE ?;
-            ",
-            timestamp,
-            timestamp,
-            path_string
-        )
-        .fetch_all(&self.database)
-        .await?
-        .into_iter()
-        .map(|record| {
-            let path_storage = self.path_files.join(record.sha256_hash);
-            builder.append_path_with_name(path_storage, record.path)
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        // Should probably return this as a TempFile and implement Deref<W> for
-        // TempFile or something like this. TempFile should probably be generic
-        // over tokio File and std File.
-        builder.into_inner()?.finish()?;
-
-        Ok(path_output_file)
+        Ok(files)
     }
 }
 
@@ -231,7 +228,7 @@ impl AppState {
     ) -> Result<()> {
         let path_copy = self.path_files.join(&file_info.hash_sha256);
         let path_storage = path_storage.as_ref().to_string_lossy().to_string();
-        let current_time = Utc::now().to_rfc3339();
+        let timestamp = Utc::now().to_rfc3339();
         let mut transaction = self.database.begin().await?;
 
         if !fs::try_exists(&path_copy).await? {
@@ -246,7 +243,7 @@ impl AppState {
                 file_info.size_in_bytes,
                 file_info.hash_md5,
                 file_info.hash_sha256,
-                current_time
+                timestamp
             )
             .execute(&mut *transaction)
             .await?;
@@ -290,7 +287,7 @@ impl AppState {
             SET valid_until = ?
             WHERE path = ? AND valid_until IS NULL;
             ",
-            current_time,
+            timestamp,
             path_storage
         )
         .execute(&mut *transaction)
@@ -303,7 +300,7 @@ impl AppState {
             ",
             file_id,
             path_storage,
-            current_time
+            timestamp
         )
         .execute(&mut *transaction)
         .await?;

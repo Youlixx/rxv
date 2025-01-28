@@ -1,7 +1,10 @@
 use std::{
-    io,
+    io::{self, IoSlice},
     mem::ManuallyDrop,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    pin::Pin,
+    task::{Context, Poll},
 };
 
 use axum::{
@@ -15,14 +18,15 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::{
     fs::{remove_file, File},
-    io::AsyncWriteExt,
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf},
 };
+use tokio_tar::{ArchiveBuilder, Builder};
 use tokio_util::io::ReaderStream;
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    database::{AppState, FileInfo, TimePoint},
+    database::{AppState, FileInfo, FileList, TimePoint},
     response::{ApiResponse, ApiResult, Error, Result},
 };
 
@@ -64,42 +68,38 @@ impl TryFrom<RequestTimePoint> for TimePoint {
 async fn get_filesystem_at(
     State(app): State<AppState>,
     ExtractPath(path): ExtractPath<String>,
-    Query(query): Query<RequestTimePoint>,
+    Query(time_point): Query<RequestTimePoint>,
 ) -> Result<Response<Body>> {
-    // TODO do this properly. have some reflection on who should manage the
-    // resource access.
-    let time_point: TimePoint = query.try_into()?;
+    let files = app.get_file_paths(&path, time_point.try_into()?).await?;
 
-    // TODO this shit's ugly...
-    // TODO: remove the expects!
-    if path.ends_with("/") {
-        let path_file = app.download_folder_from_storage(&path, time_point).await?;
+    let body = match files {
+        FileList::None => return Err(Error::FileNotFound(PathBuf::from(path))),
+        FileList::SingleFile(path) =>  Body::from_stream(ReaderStream::new(File::open(path).await?)),
+        FileList::MultipleFile(files) => {
+            // TODO use an actual temp file, and uuid generated file name.
+            let buffer = File::create("/tmp/temp_archive.tar").await?;
+            let mut builder = Builder::new(buffer);
 
-        let response = {
-            let file = tokio::fs::File::open(&path_file).await?;
+            for (absolute_local_path, archive_path) in files {
+                println!("Body::from_stream = {:#?}", &absolute_local_path);
+                let mut file = File::open(absolute_local_path).await?;
+                builder.append_file(archive_path, &mut file).await?;
+            }
+            builder.into_inner().await?;
 
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, "application/octet-stream")
-                .body(Body::from_stream(ReaderStream::new(file)))
-                .expect("Failed to build response")
-        };
+            let file = File::open("/tmp/temp_archive.tar").await?;
+            Body::from_stream(ReaderStream::new(file))
+        }
+    };
 
-        remove_file(path_file).await?;
+    // TODO remove the except
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .body(body)
+        .expect("Failed to build response");
 
-        Ok(response)
-    } else {
-        let path_file = app.download_file_from_storage(path, time_point).await?;
-        let file = tokio::fs::File::open(path_file).await?;
-
-        let response = Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "application/octet-stream")
-            .body(Body::from_stream(ReaderStream::new(file)))
-            .expect("Failed to build response");
-
-        Ok(response)
-    }
+    Ok(response)
 }
 
 #[derive(ToSchema)]
@@ -141,6 +141,48 @@ impl Drop for TempFile {
                 .await
                 .expect("Failed to delete the temp file.");
         });
+    }
+}
+
+impl AsyncRead for TempFile {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(self.file.deref_mut()).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for TempFile {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(self.file.deref_mut()).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(self.file.deref_mut()).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(self.file.deref_mut()).poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(self.file.deref_mut()).poll_write_vectored(cx, bufs)
     }
 }
 
