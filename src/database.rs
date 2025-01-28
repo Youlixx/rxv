@@ -170,7 +170,6 @@ impl AppState {
             }
         } else {
             let path_string = format!("{}%", path_string);
-            let base_path = path_storage.parent().map(|path| path.to_path_buf());
 
             let files = sqlx::query!(
                 "
@@ -187,17 +186,11 @@ impl AppState {
             .fetch_all(&self.database)
             .await?
             .into_iter()
-            .filter_map(|record| {
-                Some((
+            .map(|record| {
+                (
                     self.path_files.join(record.sha256_hash),
-                    match &base_path {
-                        Some(base_path) => PathBuf::from(record.path)
-                            .strip_prefix(base_path)
-                            .ok()?
-                            .to_path_buf(),
-                        None => PathBuf::from(record.path),
-                    },
-                ))
+                    PathBuf::from(record.path),
+                )
             })
             .collect::<Vec<_>>();
 

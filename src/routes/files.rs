@@ -10,10 +10,7 @@ use chrono::{DateTime, Utc};
 use md5::Md5;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use tokio::{
-    fs::File,
-    io::AsyncWriteExt,
-};
+use tokio::{fs::File, io::AsyncWriteExt};
 use tokio_tar::Builder;
 use tokio_util::io::ReaderStream;
 use utoipa::ToSchema;
@@ -68,12 +65,21 @@ async fn get_filesystem_at(
 
     let body = match files {
         FileList::None => return Err(Error::FileNotFound(PathBuf::from(path))),
-        FileList::SingleFile(path) =>  Body::from_stream(ReaderStream::new(File::open(path).await?)),
+        FileList::SingleFile(path) => Body::from_stream(ReaderStream::new(File::open(path).await?)),
         FileList::MultipleFile(files) => {
+            let base_path = PathBuf::from(path).parent().map(|path| path.to_path_buf());
             let buffer = TempFile::new().await?;
             let mut builder = Builder::new(buffer);
 
             for (absolute_local_path, archive_path) in files {
+                let archive_path = match &base_path {
+                    Some(base_path) => PathBuf::from(archive_path)
+                        .strip_prefix(base_path)
+                        .map_err(|_| Error::ArchiveGenerationFailed)?
+                        .to_path_buf(),
+                    None => PathBuf::from(archive_path),
+                };
+
                 let mut file = File::open(absolute_local_path).await?;
                 builder.append_file(archive_path, &mut file).await?;
             }

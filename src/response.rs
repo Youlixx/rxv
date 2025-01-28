@@ -1,6 +1,14 @@
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::{PathBuf, StripPrefixError},
+};
 
-use axum::{extract::multipart::MultipartError, http::{self, StatusCode}, response::IntoResponse, Json};
+use axum::{
+    extract::multipart::MultipartError,
+    http::{self, StatusCode},
+    response::IntoResponse,
+    Json,
+};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -33,6 +41,9 @@ pub enum Error {
     #[error("no file at the given path")]
     FileNotFound(PathBuf),
 
+    #[error("could not build the archive")]
+    ArchiveGenerationFailed,
+
     #[error("unknown error: {0}")]
     Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
@@ -40,15 +51,16 @@ pub enum Error {
 #[derive(Serialize, ToSchema)]
 #[repr(u8)]
 enum ApiErrorCode {
-    ServerSideIoError = 0,
-    ServerSideHttpError,
-    ServerSideSqlError,
-    ServerSideTempFileError,
+    ServerSideIoFailure = 0,
+    ServerSideHttpFailure,
+    ServerSideSqlFailure,
+    ServerSideTempFileFailure,
     InvalidTimestamp,
     MalformedMultipart,
     MultipartMissingField,
     FileNotFound,
-    UnknownError = u8::MAX
+    ArchiveGenerationFailed,
+    UnknownError = u8::MAX,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -98,26 +110,23 @@ impl<T> From<Error> for ApiResponse<T> {
         let (status_code, error_code, error_message) = match error {
             Error::ServerIo(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                ApiErrorCode::ServerSideIoError,
+                ApiErrorCode::ServerSideIoFailure,
                 format!("a server-side IO error occurred: {}", error),
             ),
             Error::Http(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                ApiErrorCode::ServerSideHttpError,
+                ApiErrorCode::ServerSideHttpFailure,
                 format!("a server-side HTTP error occured: {}", error),
             ),
             Error::Sql(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                ApiErrorCode::ServerSideSqlError,
+                ApiErrorCode::ServerSideSqlFailure,
                 format!("a server-side SQL error occurred: {}", error),
             ),
             Error::TempFile(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                ApiErrorCode::ServerSideTempFileError,
-                format!(
-                    "a server-side temp file error occured: {}",
-                    error
-                ),
+                ApiErrorCode::ServerSideTempFileFailure,
+                format!("a server-side temp file error occured: {}", error),
             ),
             Error::TimestampParseError(error) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -144,6 +153,11 @@ impl<T> From<Error> for ApiResponse<T> {
                     "the path '{}' does not point to a live file",
                     path.to_string_lossy()
                 ),
+            ),
+            Error::ArchiveGenerationFailed => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiErrorCode::ArchiveGenerationFailed,
+                String::from("could not generate the archive"),
             ),
             Error::Unknown(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
