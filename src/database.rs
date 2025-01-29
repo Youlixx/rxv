@@ -231,22 +231,25 @@ impl AppState {
         let timestamp = Utc::now().to_rfc3339();
         let mut transaction = self.database.begin().await?;
 
-        if !fs::try_exists(&path_copy).await? {
+        let file_id = if !fs::try_exists(&path_copy).await? {
             fs::copy(path_file, path_copy).await?;
 
-            sqlx::query!(
-                "
+            Some(
+                sqlx::query!(
+                    "
                 INSERT INTO files (original_file_name, size, md5_hash, sha256_hash, upload_date)
                 VALUES (?, ?, ?, ?, ?)
                 ",
-                file_info.original_name,
-                file_info.size_in_bytes,
-                file_info.hash_md5,
-                file_info.hash_sha256,
-                timestamp
+                    file_info.original_name,
+                    file_info.size_in_bytes,
+                    file_info.hash_md5,
+                    file_info.hash_sha256,
+                    timestamp
+                )
+                .execute(&mut *transaction)
+                .await?
+                .last_insert_rowid() as i64,
             )
-            .execute(&mut *transaction)
-            .await?;
         } else {
             // If a user attempts to create a new path that already exists and
             // points to the same file, the transaction should be canceled.
@@ -271,15 +274,15 @@ impl AppState {
                 transaction.rollback().await?;
                 return Ok(());
             }
-        }
 
-        let file_id = sqlx::query!(
-            "SELECT id FROM files WHERE sha256_hash = ?;",
-            file_info.hash_sha256
-        )
-        .fetch_one(&mut *transaction)
-        .await?
-        .id;
+            sqlx::query!(
+                "SELECT id FROM files WHERE sha256_hash = ?;",
+                file_info.hash_sha256
+            )
+            .fetch_one(&mut *transaction)
+            .await?
+            .id
+        };
 
         sqlx::query!(
             "
