@@ -2,7 +2,7 @@ mod database;
 mod response;
 mod routes;
 
-use routes::files;
+use routes::{files, fs};
 
 use database::AppState;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -25,7 +25,8 @@ async fn main() {
     let state = AppState::new("/storage").await.unwrap();
 
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .nest("/api/v1/files", files::router(state.clone()))
+        .merge(files::router(state.clone()))
+        .nest("/fs", fs::router(state.clone()))
         .split_for_parts();
 
     let router =
