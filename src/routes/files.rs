@@ -5,6 +5,7 @@ use axum::{
     body::Body,
     extract::{Multipart, Path as ExtractPath, Query, State},
     http::{header, Response, StatusCode},
+    routing::get,
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use md5::Md5;
@@ -21,10 +22,11 @@ use crate::{
     response::{ApiResponse, ApiResult, Error, Result},
 };
 
-pub fn router(state: AppState) -> OpenApiRouter {
+pub fn router(storage: AppState) -> OpenApiRouter {
     OpenApiRouter::new()
+        .route("/files/", get(download_file))
         .routes(routes!(download_file, upload_file, delete_file))
-        .with_state(state)
+        .with_state(storage)
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -47,24 +49,36 @@ impl TryFrom<RequestTimePoint> for DateTime<Utc> {
 
 #[utoipa::path(
     get,
-    path = "/{*path}",
+    path = "/files/{*path}",
     tag = "files",
     responses(
         (status = 200, description = "The filepaths were successfully returned")
     )
 )]
 async fn download_file(
-    State(app): State<AppState>,
-    ExtractPath(path): ExtractPath<String>,
+    State(storage): State<AppState>,
+    path: Option<ExtractPath<String>>,
     Query(time_point): Query<RequestTimePoint>,
 ) -> Result<Response<Body>> {
-    let files = app.get_file_paths(&path, time_point.try_into()?).await?;
+    let path = path.map(|path| PathBuf::from(path.0));
+    let files = storage
+        .get_file_paths(path.clone().into(), time_point.try_into()?)
+        .await?;
+
+    let mut response_builder = Response::builder();
 
     let body = match files {
-        FileList::None => return Err(Error::FileNotFound(PathBuf::from(path))),
+        FileList::None => {
+            return Err(Error::FileNotFound(PathBuf::from(
+                path.unwrap_or(PathBuf::from("/")),
+            )))
+        }
         FileList::SingleFile(path) => Body::from_stream(ReaderStream::new(File::open(path).await?)),
         FileList::MultipleFile(files) => {
-            let base_path = PathBuf::from(path).parent().map(|path| path.to_path_buf());
+            let base_path = path
+                .clone()
+                .map(|path| PathBuf::from(path).parent().map(|path| path.to_path_buf()))
+                .flatten();
             let buffer = TempFile::new().await?;
             let mut builder = Builder::new(buffer);
 
@@ -81,12 +95,25 @@ async fn download_file(
                 builder.append_file(archive_path, &mut file).await?;
             }
 
+            let file_name = match path {
+                Some(ref path) => path.file_name().map(|x| x.to_string_lossy()),
+                None => None,
+            };
+
+            response_builder = response_builder.header(
+                header::CONTENT_DISPOSITION,
+                format!(
+                    "attachment; filename=\"{}.tar\"",
+                    file_name.unwrap_or("archive".into())
+                ),
+            );
+
             let file = builder.into_inner().await?.open_ro().await?;
             Body::from_stream(ReaderStream::new(file))
         }
     };
 
-    let response = Response::builder()
+    let response = response_builder
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .body(body)?;
@@ -146,14 +173,14 @@ impl FileInfoBuilder {
         content = inline(UploadFileRequest),
         content_type = "multipart/form-data"
     ),
-    path = "/{*path}",
+    path = "/files/{*path}",
     tag = "files",
     responses(
         (status = 201, description = "The file was successfully uploaded")
     )
 )]
 async fn upload_file(
-    State(state): State<AppState>,
+    State(storage): State<AppState>,
     ExtractPath(path): ExtractPath<String>,
     mut multipart: Multipart,
 ) -> ApiResult<()> {
@@ -186,7 +213,7 @@ async fn upload_file(
     let hash_sha256 = hex::encode(hasher_sha256.finalize());
     file_info_builder.hashes(hash_md5, hash_sha256);
 
-    state
+    storage
         .add_new_file_to_storage(
             temp_file.file_path(),
             &path,
@@ -204,17 +231,17 @@ async fn upload_file(
 
 #[utoipa::path(
     delete,
-    path = "/{*path}",
+    path = "/files/{*path}",
     tag = "files",
     responses(
         (status = 200, description = "The file or folder got deleted")
     )
 )]
 async fn delete_file(
-    State(state): State<AppState>,
+    State(storage): State<AppState>,
     ExtractPath(path): ExtractPath<String>,
 ) -> ApiResult<()> {
-    state
+    storage
         .delete_file_from_storage(&path)
         .await
         .map(|_| ApiResponse::success(()))
