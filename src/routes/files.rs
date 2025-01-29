@@ -23,8 +23,7 @@ use crate::{
 
 pub fn router(state: AppState) -> OpenApiRouter {
     OpenApiRouter::new()
-        .routes(routes!(upload_file))
-        .routes(routes!(get_filesystem_at))
+        .routes(routes!(download_file, upload_file, delete_file))
         .with_state(state)
 }
 
@@ -56,7 +55,7 @@ impl TryFrom<RequestTimePoint> for TimePoint {
         (status = 200, description = "The filepaths were successfully returned")
     )
 )]
-async fn get_filesystem_at(
+async fn download_file(
     State(app): State<AppState>,
     ExtractPath(path): ExtractPath<String>,
     Query(time_point): Query<RequestTimePoint>,
@@ -203,4 +202,22 @@ async fn upload_file(
         StatusCode::CREATED,
         (),
     ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/{*path}",
+    tag = "files",
+    responses(
+        (status = 200, description = "The file or folder got deleted")
+    )
+)]
+async fn delete_file(
+    State(state): State<AppState>,
+    ExtractPath(path): ExtractPath<String>,
+) -> ApiResult<()> {
+    state
+        .delete_file_from_storage(&path)
+        .await
+        .map(|_| ApiResponse::success(()))
 }

@@ -9,7 +9,7 @@ use sqlx::SqlitePool;
 use tokio::fs;
 use utoipa::ToSchema;
 
-use crate::response::Result;
+use crate::response::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -308,5 +308,49 @@ impl AppState {
         transaction.commit().await?;
 
         Ok(())
+    }
+}
+
+impl AppState {
+    pub async fn delete_file_from_storage(&self, path_storage: impl AsRef<Path>) -> Result<()> {
+        let path_storage = path_storage.as_ref().to_path_buf();
+        let path_string = path_storage.to_string_lossy();
+        let timestamp = Utc::now().to_rfc3339();
+
+        let files_deleted = if !path_string.ends_with("/") {
+            sqlx::query!(
+                "
+                UPDATE paths
+                SET valid_until = ?
+                WHERE path = ? AND valid_until IS NULL;
+                ",
+                timestamp,
+                path_string
+            )
+            .execute(&self.database)
+            .await?
+            .rows_affected()
+        } else {
+            let path_string = format!("{}%", path_string);
+
+            sqlx::query!(
+                "
+                UPDATE paths
+                SET valid_until = ?
+                WHERE path LIKE ? AND valid_until IS NULL;
+                ",
+                timestamp,
+                path_string
+            )
+            .execute(&self.database)
+            .await?
+            .rows_affected()
+        };
+
+        if files_deleted == 0 {
+            Err(Error::FileNotFound(path_storage))
+        } else {
+            Ok(())
+        }
     }
 }
