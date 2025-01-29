@@ -80,58 +80,78 @@ impl AppState {
     }
 }
 
+#[derive(Debug)]
+pub enum TargetDownload {
+    FullStorage,
+    File(PathBuf),
+    Folder(PathBuf),
+}
+
+impl<P> From<Option<P>> for TargetDownload
+where
+    P: AsRef<Path>,
+{
+    fn from(value: Option<P>) -> Self {
+        match value {
+            Some(path) => {
+                let path = path.as_ref().to_string_lossy().to_string();
+
+                if path.ends_with("/") {
+                    TargetDownload::Folder(PathBuf::from(path))
+                } else {
+                    TargetDownload::File(PathBuf::from(path))
+                }
+            }
+            None => TargetDownload::FullStorage,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum FileList {
     None,
     SingleFile(PathBuf),
     MultipleFile(Vec<(PathBuf, PathBuf)>),
 }
 
+impl From<Vec<(PathBuf, PathBuf)>> for FileList {
+    fn from(value: Vec<(PathBuf, PathBuf)>) -> Self {
+        if value.is_empty() {
+            FileList::None
+        } else {
+            FileList::MultipleFile(value)
+        }
+    }
+}
+
+impl From<Option<PathBuf>> for FileList {
+    fn from(value: Option<PathBuf>) -> Self {
+        match value {
+            Some(path) => FileList::SingleFile(path),
+            None => FileList::None,
+        }
+    }
+}
+
 impl AppState {
     pub async fn get_file_paths(
         &self,
-        path_storage: impl AsRef<Path>,
+        target_download: TargetDownload,
         timestamp: DateTime<Utc>,
     ) -> Result<FileList> {
+        dbg!(&target_download);
         let timestamp = timestamp.to_rfc3339();
-        let path_storage = path_storage.as_ref().to_path_buf();
-        let path_string = path_storage.to_string_lossy();
 
-        let files = if !path_string.ends_with("/") {
-            let file_hash = sqlx::query!(
-                "
-                SELECT files.sha256_hash FROM files
-                INNER JOIN paths ON files.id == paths.file_id
-                WHERE ? >= paths.valid_since
-                    AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
-                    AND paths.path == ?;
-                ",
-                timestamp,
-                timestamp,
-                path_string
-            )
-            .fetch_optional(&self.database)
-            .await?;
-
-            match file_hash {
-                Some(file_hash) => {
-                    FileList::SingleFile(self.path_files.join(file_hash.sha256_hash))
-                }
-                None => FileList::None,
-            }
-        } else {
-            let path_string = format!("{}%", path_string);
-
-            let files = sqlx::query!(
+        let files: FileList = match target_download {
+            TargetDownload::FullStorage => sqlx::query!(
                 "
                 SELECT files.sha256_hash, paths.path FROM files
                 INNER JOIN paths ON files.id == paths.file_id
                 WHERE ? >= paths.valid_since
-                    AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
-                    AND paths.path LIKE ?;
+                    AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z');
                 ",
                 timestamp,
-                timestamp,
-                path_string
+                timestamp
             )
             .fetch_all(&self.database)
             .await?
@@ -142,12 +162,53 @@ impl AppState {
                     PathBuf::from(record.path),
                 )
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+            .into(),
+            TargetDownload::File(path) => {
+                let path_string = path.to_string_lossy();
+                sqlx::query!(
+                    "
+                    SELECT files.sha256_hash FROM files
+                    INNER JOIN paths ON files.id == paths.file_id
+                    WHERE ? >= paths.valid_since
+                        AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
+                        AND paths.path == ?;
+                    ",
+                    timestamp,
+                    timestamp,
+                    path_string
+                )
+                .fetch_optional(&self.database)
+                .await?
+                .map(|file_hash| self.path_files.join(file_hash.sha256_hash))
+                .into()
+            }
+            TargetDownload::Folder(path) => {
+                let path_string = format!("{}%", path.to_string_lossy());
 
-            if files.is_empty() {
-                FileList::None
-            } else {
-                FileList::MultipleFile(files)
+                sqlx::query!(
+                    "
+                    SELECT files.sha256_hash, paths.path FROM files
+                    INNER JOIN paths ON files.id == paths.file_id
+                    WHERE ? >= paths.valid_since
+                        AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
+                        AND paths.path LIKE ?;
+                    ",
+                    timestamp,
+                    timestamp,
+                    path_string
+                )
+                .fetch_all(&self.database)
+                .await?
+                .into_iter()
+                .map(|record| {
+                    (
+                        self.path_files.join(record.sha256_hash),
+                        PathBuf::from(record.path),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .into()
             }
         };
 
