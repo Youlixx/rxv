@@ -1,7 +1,4 @@
-use std::{
-    io,
-    path::{PathBuf, StripPrefixError},
-};
+use std::{io, path::PathBuf};
 
 use axum::{
     extract::multipart::MultipartError,
