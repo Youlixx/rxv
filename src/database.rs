@@ -1,13 +1,8 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, TimeDelta, TimeZone, Utc};
-use serde::Serialize;
+use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::SqlitePool;
 use tokio::fs;
-use utoipa::ToSchema;
 
 use crate::response::{Error, Result};
 
@@ -82,37 +77,6 @@ impl AppState {
             database,
             path_files,
         })
-    }
-}
-
-// TODO might be good to also give file info, like HashMap<String, FileInfo>
-#[derive(Serialize, ToSchema)]
-pub struct FileSystemState {
-    paths: HashMap<String, i64>,
-}
-
-impl AppState {
-    pub async fn get_filesystem_at<T>(&self, timestamp: DateTime<T>) -> Result<FileSystemState>
-    where
-        T: TimeZone,
-    {
-        let timestamp = timestamp.to_rfc3339();
-
-        let paths = sqlx::query!(
-            "
-            SELECT path, file_id FROM paths
-            WHERE ? >= valid_since AND ? < COALESCE(valid_until, '9999-12-31T23:59:59Z');
-            ",
-            timestamp,
-            timestamp
-        )
-        .fetch_all(&self.database)
-        .await?
-        .into_iter()
-        .map(|record| (record.path, record.file_id))
-        .collect();
-
-        Ok(FileSystemState { paths })
     }
 }
 
