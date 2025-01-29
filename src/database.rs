@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use tokio::fs;
 
@@ -80,20 +80,6 @@ impl AppState {
     }
 }
 
-pub enum TimePoint {
-    Absolute(DateTime<Utc>),
-    Relative(TimeDelta),
-}
-
-impl TimePoint {
-    fn to_absolute(self) -> DateTime<Utc> {
-        match self {
-            TimePoint::Absolute(timestamp) => timestamp,
-            TimePoint::Relative(delta) => Utc::now() - delta,
-        }
-    }
-}
-
 pub enum FileList {
     None,
     SingleFile(PathBuf),
@@ -104,9 +90,9 @@ impl AppState {
     pub async fn get_file_paths(
         &self,
         path_storage: impl AsRef<Path>,
-        time_point: TimePoint,
+        timestamp: DateTime<Utc>,
     ) -> Result<FileList> {
-        let timestamp = time_point.to_absolute().to_rfc3339();
+        let timestamp = timestamp.to_rfc3339();
         let path_storage = path_storage.as_ref().to_path_buf();
         let path_string = path_storage.to_string_lossy();
 

@@ -6,7 +6,7 @@ use axum::{
     extract::{Multipart, Path as ExtractPath, Query, State},
     http::{header, Response, StatusCode},
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use md5::Md5;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -17,7 +17,7 @@ use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    database::{AppState, FileInfo, FileList, TimePoint},
+    database::{AppState, FileInfo, FileList},
     response::{ApiResponse, ApiResult, Error, Result},
 };
 
@@ -30,19 +30,17 @@ pub fn router(state: AppState) -> OpenApiRouter {
 #[derive(Deserialize, ToSchema)]
 struct RequestTimePoint {
     timestamp: Option<String>,
-    delta: Option<String>,
+    seconds: Option<i64>,
 }
 
-impl TryFrom<RequestTimePoint> for TimePoint {
+impl TryFrom<RequestTimePoint> for DateTime<Utc> {
     type Error = Error;
 
     fn try_from(value: RequestTimePoint) -> std::result::Result<Self, Self::Error> {
-        Ok(match (value.timestamp, value.delta) {
-            (Some(timestamp), _) => {
-                TimePoint::Absolute(DateTime::parse_from_rfc3339(&timestamp)?.with_timezone(&Utc))
-            }
-            (None, Some(delta)) => todo!(),
-            _ => TimePoint::Absolute(Utc::now()),
+        Ok(match (value.timestamp, value.seconds) {
+            (Some(timestamp), _) => DateTime::parse_from_rfc3339(&timestamp)?.with_timezone(&Utc),
+            (None, Some(seconds)) => Utc::now() - TimeDelta::seconds(seconds),
+            _ => Utc::now(),
         })
     }
 }
