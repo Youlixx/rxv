@@ -1,6 +1,7 @@
 mod database;
 mod response;
 mod routes;
+mod path;
 
 use routes::{files, fs};
 
