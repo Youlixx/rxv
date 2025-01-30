@@ -81,33 +81,6 @@ impl AppState {
 }
 
 #[derive(Debug)]
-pub enum TargetDownload {
-    FullStorage,
-    File(PathBuf),
-    Folder(PathBuf),
-}
-
-impl<P> From<Option<P>> for TargetDownload
-where
-    P: AsRef<Path>,
-{
-    fn from(value: Option<P>) -> Self {
-        match value {
-            Some(path) => {
-                let path = path.as_ref().to_string_lossy().to_string();
-
-                if path.ends_with("/") {
-                    TargetDownload::Folder(PathBuf::from(path))
-                } else {
-                    TargetDownload::File(PathBuf::from(path))
-                }
-            }
-            None => TargetDownload::FullStorage,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub enum FileList {
     None,
     SingleFile(PathBuf),
