@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                UPDATE paths\n                SET valid_until = ?\n                WHERE path LIKE ? AND valid_until IS NULL;\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "8844942b3a6d748b99a625855c1a97f826bc6ca218d64e8d830963567a5a8066"
+}
