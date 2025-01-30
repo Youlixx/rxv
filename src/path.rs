@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 /// A storage relative path.
 ///
 /// A simple wrapper around a [`String`], representing a path relative to the
@@ -98,6 +100,11 @@ impl StoragePath {
 
             Some(StoragePath(subpath.0[prefix_length..].into()))
         }
+    }
+
+    /// Converts a `StoragePath` to an owned [`PathBuf`].
+    pub fn to_path_buf(self) -> PathBuf {
+        PathBuf::from(self.0)
     }
 }
 

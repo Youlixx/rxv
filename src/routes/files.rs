@@ -19,6 +19,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     database::{AppState, FileInfo, FileList},
+    path::StoragePath,
     response::{ApiResponse, ApiResult, Error, Result},
 };
 
@@ -60,52 +61,37 @@ async fn download_file(
     path: Option<ExtractPath<String>>,
     Query(time_point): Query<RequestTimePoint>,
 ) -> Result<Response<Body>> {
-    let path = path.map(|path| PathBuf::from(path.0));
+    let path = match path {
+        Some(ExtractPath(path)) => StoragePath::from(path),
+        None => StoragePath::default(),
+    };
+
     let files = storage
-        .get_file_paths(path.clone().into(), time_point.try_into()?)
+        .get_file_paths(&path, time_point.try_into()?)
         .await?;
 
     let mut response_builder = Response::builder();
 
     let body = match files {
-        FileList::None => {
-            return Err(Error::FileNotFound(PathBuf::from(
-                path.unwrap_or(PathBuf::from("/")),
-            )))
-        }
+        FileList::None => return Err(Error::FileNotFound(PathBuf::from(path.to_str()))),
         FileList::SingleFile(path) => Body::from_stream(ReaderStream::new(File::open(path).await?)),
         FileList::MultipleFile(files) => {
-            let base_path = path
-                .clone()
-                .map(|path| PathBuf::from(path).parent().map(|path| path.to_path_buf()))
-                .flatten();
             let buffer = TempFile::new().await?;
             let mut builder = Builder::new(buffer);
 
-            for (absolute_local_path, archive_path) in files {
-                let archive_path = match &base_path {
-                    Some(base_path) => PathBuf::from(archive_path)
-                        .strip_prefix(base_path)
-                        .map_err(|_| Error::ArchiveGenerationFailed)?
-                        .to_path_buf(),
-                    None => PathBuf::from(archive_path),
-                };
+            for (path_file, storage_path) in files {
+                let path_archive = path
+                    .remove_prefix(&storage_path)
+                    .ok_or(Error::ArchiveGenerationFailed)?
+                    .to_path_buf();
 
-                let mut file = File::open(absolute_local_path).await?;
-                builder.append_file(archive_path, &mut file).await?;
+                let mut file = File::open(path_file).await?;
+                builder.append_file(path_archive, &mut file).await?;
             }
-
-            let file_name = match path {
-                Some(ref path) => path.file_name().map(|x| x.to_string_lossy()),
-                None => None,
-            };
 
             response_builder = response_builder.header(
                 header::CONTENT_DISPOSITION,
-                format!(
-                    "attachment; filename=\"{}.tar\"",
-                    file_name.unwrap_or("archive".into())
-                ),
+                format!("attachment; filename=\"{}.tar\"", path.filename()),
             );
 
             let file = builder.into_inner().await?.open_ro().await?;
