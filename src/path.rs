@@ -22,7 +22,24 @@ impl StoragePath {
 
     /// Return whether or not the path points to a directory.
     pub fn is_dir(&self) -> bool {
-        self.0.ends_with(StoragePath::SEPARATOR)
+        self.0.ends_with(StoragePath::SEPARATOR) || self.is_root()
+    }
+
+    /// Return a string pointer to the wrapped String.
+    pub fn to_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Get the matching pattern used in SQL request.
+    ///
+    /// For files, this function return the exact path, and for folder or root,
+    /// it inserts a SQL wildcard.
+    pub fn get_sql_matching_pattern(&self) -> String {
+        if self.is_file() {
+            self.0.clone()
+        } else {
+            format!("{}%", self.0)
+        }
     }
 
     /// Get the filename of the object pointed by the path.
@@ -119,7 +136,7 @@ mod tests {
 
         let path_root = StoragePath::from("");
         assert!(!path_root.is_file());
-        assert!(!path_root.is_dir());
+        assert!(path_root.is_dir());
         assert!(path_root.is_root());
     }
 
