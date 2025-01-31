@@ -18,7 +18,7 @@ use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    database::{AppState, FileInfo, FileList},
+    database::{upload::FileInfo, AppState, FileList},
     path::StoragePath,
     response::{ApiResponse, ApiResult, Error, Result},
 };
