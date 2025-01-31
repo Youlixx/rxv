@@ -1,7 +1,7 @@
 mod database;
+mod path;
 mod response;
 mod routes;
-mod path;
 
 use routes::files;
 
