@@ -1,6 +1,5 @@
 name: "Test Suite"
 on:
-  push:
   pull_request:
 
 env:
