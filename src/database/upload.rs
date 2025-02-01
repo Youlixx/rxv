@@ -3,7 +3,7 @@ use std::path::Path;
 use chrono::Utc;
 use tokio::fs;
 
-use crate::response::Result;
+use crate::{path::StoragePath, response::Result};
 
 use super::AppState;
 
@@ -25,11 +25,11 @@ impl AppState {
     pub async fn add_new_file_to_storage(
         &self,
         path_file: impl AsRef<Path>,
-        path_storage: impl AsRef<Path>, // TODO path_storage should be a StoragePath
+        path_storage: StoragePath,
         file_info: FileInfo,
     ) -> Result<()> {
         let path_copy = self.path_files.join(&file_info.hash_sha256);
-        let path_storage = path_storage.as_ref().to_string_lossy().to_string();
+        let path_storage = path_storage.to_str();
         let timestamp = Utc::now().to_rfc3339();
         let mut transaction = self.database.begin().await?;
 
@@ -195,7 +195,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                "my_files/helloworld.txt",
+                "my_files/helloworld.txt".into(),
                 file_info.clone(),
             )
             .await?;
@@ -260,7 +260,7 @@ mod tests {
             let (file, file_info) = create_dummy_file(file_content).await?;
 
             database
-                .add_new_file_to_storage(file.file_path(), path_storage, file_info.clone())
+                .add_new_file_to_storage(file.file_path(), path_storage.into(), file_info.clone())
                 .await?;
 
             file_infos.push((*path_storage, *file_content, file_info));
@@ -333,11 +333,11 @@ mod tests {
         let (file, file_info) = create_dummy_file(file_content).await?;
 
         database
-            .add_new_file_to_storage(file.file_path(), storage_paths[0], file_info.clone())
+            .add_new_file_to_storage(file.file_path(), storage_paths[0].into(), file_info.clone())
             .await?;
 
         database
-            .add_new_file_to_storage(file.file_path(), storage_paths[1], file_info.clone())
+            .add_new_file_to_storage(file.file_path(), storage_paths[1].into(), file_info.clone())
             .await?;
 
         let inserted_files = sqlx::query!("SELECT * FROM files;")
@@ -399,7 +399,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file_base.file_path(),
-                "my_files/override_me.txt",
+                "my_files/override_me.txt".into(),
                 file_base_info.clone(),
             )
             .await?;
@@ -410,7 +410,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file_over.file_path(),
-                "my_files/override_me.txt",
+                "my_files/override_me.txt".into(),
                 file_over_info.clone(),
             )
             .await?;
@@ -490,7 +490,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                "my_files/helloworld.txt",
+                "my_files/helloworld.txt".into(),
                 file_info.clone(),
             )
             .await?;
@@ -501,7 +501,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                "my_files/helloworld.txt",
+                "my_files/helloworld.txt".into(),
                 file_info.clone(),
             )
             .await?;
@@ -569,7 +569,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                "my_files/helloworld.txt",
+                "my_files/helloworld.txt".into(),
                 file_info.clone(),
             )
             .await?;
