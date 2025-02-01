@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT COUNT(id) as count FROM paths\n            WHERE valid_until IS NULL AND path == ? AND file_id = ?;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "count",
+        "ordinal": 0,
+        "type_info": "Int"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4543ac6b5e7c83fb22f854c7399d2591b6e187f30559419591f57aa33b469949"
+}

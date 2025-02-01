@@ -25,7 +25,7 @@ impl AppState {
     pub async fn add_new_file_to_storage(
         &self,
         path_file: impl AsRef<Path>,
-        path_storage: impl AsRef<Path>,
+        path_storage: impl AsRef<Path>, // TODO path_storage should be a StoragePath
         file_info: FileInfo,
     ) -> Result<()> {
         let path_copy = self.path_files.join(&file_info.hash_sha256);
@@ -33,65 +33,63 @@ impl AppState {
         let timestamp = Utc::now().to_rfc3339();
         let mut transaction = self.database.begin().await?;
 
-        let file_id = if !fs::try_exists(&path_copy).await? {
-            fs::copy(path_file, path_copy).await?;
+        let current_file_id = sqlx::query!(
+            r#"SELECT id as "id!" FROM files WHERE sha256_hash = ?;"#,
+            file_info.hash_sha256
+        )
+        .fetch_one(&mut *transaction)
+        .await;
 
-            Some(
-                sqlx::query!(
-                    "
-                INSERT INTO files (original_file_name, size, md5_hash, sha256_hash, upload_date)
-                VALUES (?, ?, ?, ?, ?)
-                ",
-                    file_info.original_name,
-                    file_info.size_in_bytes,
-                    file_info.hash_md5,
-                    file_info.hash_sha256,
-                    timestamp
-                )
-                .execute(&mut *transaction)
-                .await?
-                .last_insert_rowid() as i64,
-            )
-        } else {
-            // If a user attempts to create a new path that already exists and
-            // points to the same file, the transaction should be canceled.
-            // This approach prevents the same path from being invalidated and
-            // then revalidated consecutively at the same timestamp.
-            let same_file_with_same_path = sqlx::query!(
-                "
-                SELECT COUNT(paths.id) as count FROM files
-                INNER JOIN paths ON files.id == paths.file_id
-                WHERE paths.valid_until IS NULL
-                    AND paths.path == ?
-                    AND files.sha256_hash = ?;
-                ",
-                path_storage,
-                file_info.hash_sha256
-            )
-            .fetch_one(&mut *transaction)
-            .await?
-            .count;
+        let file_id = match current_file_id {
+            Ok(record) => record.id,
+            Err(error) => match error {
+                sqlx::Error::RowNotFound => {
+                    if !fs::try_exists(&path_copy).await? {
+                        fs::copy(path_file, path_copy).await?;
+                    }
 
-            if same_file_with_same_path != 0 {
-                transaction.rollback().await?;
-                return Ok(());
-            }
-
-            sqlx::query!(
-                "SELECT id FROM files WHERE sha256_hash = ?;",
-                file_info.hash_sha256
-            )
-            .fetch_one(&mut *transaction)
-            .await?
-            .id
+                    sqlx::query!(
+                        r#"
+                        INSERT INTO files (original_file_name, size, md5_hash, sha256_hash, upload_date)
+                        VALUES (?, ?, ?, ?, ?)
+                        "#,
+                        file_info.original_name,
+                        file_info.size_in_bytes,
+                        file_info.hash_md5,
+                        file_info.hash_sha256,
+                        timestamp
+                    )
+                    .execute(&mut *transaction)
+                    .await?
+                    .last_insert_rowid() as i64
+                }
+                _ => return Err(error.into()),
+            },
         };
 
+        let same_file_with_same_path = sqlx::query!(
+            r#"
+            SELECT COUNT(id) as count FROM paths
+            WHERE valid_until IS NULL AND path == ? AND file_id = ?;
+            "#,
+            path_storage,
+            file_id
+        )
+        .fetch_one(&mut *transaction)
+        .await?
+        .count;
+
+        if same_file_with_same_path > 0 {
+            transaction.rollback().await?;
+            return Ok(());
+        }
+
         sqlx::query!(
-            "
+            r#"
             UPDATE paths
             SET valid_until = ?
             WHERE path = ? AND valid_until IS NULL;
-            ",
+            "#,
             timestamp,
             path_storage
         )
@@ -99,10 +97,10 @@ impl AppState {
         .await?;
 
         sqlx::query!(
-            "
+            r#"
             INSERT INTO paths (file_id, path, valid_since, valid_until)
             VALUES (?, ?, ?, NULL);
-            ",
+            "#,
             file_id,
             path_storage,
             timestamp
@@ -135,10 +133,7 @@ mod tests {
         time::sleep,
     };
 
-    use crate::{
-        database::AppState,
-        response::Result,
-    };
+    use crate::{database::AppState, response::Result};
 
     use super::FileInfo;
 
@@ -566,7 +561,7 @@ mod tests {
         let (file, file_info) = create_dummy_file(file_content).await?;
 
         let path_saved_file = database.path_files.join(&file_info.hash_sha256);
-        File::open(path_saved_file)
+        File::create(path_saved_file)
             .await?
             .write_all(file_content)
             .await?;
