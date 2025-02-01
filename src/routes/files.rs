@@ -18,7 +18,7 @@ use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    database::{upload::FileInfo, AppState, FileList},
+    database::{download::StoragePaths, upload::FileInfo, AppState},
     path::StoragePath,
     response::{ApiResponse, ApiResult, Error, Result},
 };
@@ -73,9 +73,9 @@ async fn download_file(
     let mut response_builder = Response::builder();
 
     let body = match files {
-        FileList::None => return Err(Error::FileNotFound(PathBuf::from(path.to_str()))),
-        FileList::SingleFile(path) => Body::from_stream(ReaderStream::new(File::open(path).await?)),
-        FileList::MultipleFile(files) => {
+        StoragePaths::None => return Err(Error::FileNotFound(PathBuf::from(path.to_str()))),
+        StoragePaths::File(path) => Body::from_stream(ReaderStream::new(File::open(path).await?)),
+        StoragePaths::Directory(files) => {
             let buffer = TempFile::new().await?;
             let mut builder = Builder::new(buffer);
 

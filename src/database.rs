@@ -1,15 +1,13 @@
+pub mod download;
 pub mod upload;
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx::SqlitePool;
 use tokio::fs;
 
-use crate::{
-    path::StoragePath,
-    response::{Error, Result},
-};
+use crate::response::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -82,106 +80,6 @@ impl AppState {
             database,
             path_files,
         })
-    }
-}
-
-#[derive(Debug)]
-pub enum FileList {
-    None,
-    SingleFile(PathBuf),
-    MultipleFile(Vec<(PathBuf, StoragePath)>),
-}
-
-impl From<Vec<(PathBuf, StoragePath)>> for FileList {
-    fn from(value: Vec<(PathBuf, StoragePath)>) -> Self {
-        if value.is_empty() {
-            FileList::None
-        } else {
-            FileList::MultipleFile(value)
-        }
-    }
-}
-
-impl From<Option<PathBuf>> for FileList {
-    fn from(value: Option<PathBuf>) -> Self {
-        match value {
-            Some(path) => FileList::SingleFile(path),
-            None => FileList::None,
-        }
-    }
-}
-
-impl AppState {
-    /// Retrieve the list of live file that match the given root path.
-    ///
-    /// This function can be used to retrieve the actual physical path to the
-    /// files on the disk. Three cases are handled by this function :
-    /// - the target storage path is the actual root path, in which case all
-    ///   the live storage files are returned.
-    /// - the target storage path points to a single file, in which case the
-    ///   actual path to the file is returned if it exists.
-    /// - the target storage path points to a folder (must end with '/'), in
-    ///   which case all that path to all the live files are returned.
-    /// Note that when dealing with the root path or folders, this function
-    /// recursively retrieve all the file, including sub-folders.
-    pub async fn get_file_paths(
-        &self,
-        base_path: &StoragePath,
-        timestamp: DateTime<Utc>,
-    ) -> Result<FileList> {
-        let timestamp = timestamp.to_rfc3339();
-
-        let files = if base_path.is_dir() {
-            let path_wildcard = base_path.get_sql_matching_pattern();
-            let query = sqlx::query!(
-                "
-                SELECT files.sha256_hash, paths.path FROM files
-                INNER JOIN paths ON files.id == paths.file_id
-                WHERE ? >= paths.valid_since
-                    AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
-                    AND paths.path LIKE ?;
-                ",
-                timestamp,
-                timestamp,
-                path_wildcard
-            );
-
-            query
-                .fetch_all(&self.database)
-                .await?
-                .into_iter()
-                .map(|record| {
-                    (
-                        self.path_files.join(record.sha256_hash),
-                        StoragePath::from(record.path),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .into()
-        } else {
-            let storage_relative_path_file = base_path.to_str();
-
-            let query = sqlx::query!(
-                "
-                SELECT files.sha256_hash FROM files
-                INNER JOIN paths ON files.id == paths.file_id
-                WHERE ? >= paths.valid_since
-                    AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')
-                    AND paths.path == ?;
-                ",
-                timestamp,
-                timestamp,
-                storage_relative_path_file
-            );
-
-            query
-                .fetch_optional(&self.database)
-                .await?
-                .map(|file_hash| self.path_files.join(file_hash.sha256_hash))
-                .into()
-        };
-
-        Ok(files)
     }
 }
 
