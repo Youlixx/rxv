@@ -119,7 +119,7 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::Http(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 ApiErrorCode::ServerSideHttpFailure,
-                format!("a server-side HTTP error occured: {}", error),
+                format!("a server-side HTTP error occurred: {}", error),
             ),
             Error::Sql(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -129,7 +129,7 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::TempFile(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 ApiErrorCode::ServerSideTempFileFailure,
-                format!("a server-side temp file error occured: {}", error),
+                format!("a server-side temp file error occurred: {}", error),
             ),
             Error::TimestampParseError(error) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -152,7 +152,7 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::InvalidFilePath(path) => (
                 StatusCode::BAD_REQUEST,
                 ApiErrorCode::InvalidFilePath,
-                format!("the path '{}' does not point to a file", path.to_str())
+                format!("the path '{}' does not point to a file", path.to_str()),
             ),
             Error::FileNotFound(path) => (
                 StatusCode::NOT_FOUND,
