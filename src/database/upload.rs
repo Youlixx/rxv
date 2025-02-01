@@ -3,7 +3,10 @@ use std::path::Path;
 use chrono::Utc;
 use tokio::fs;
 
-use crate::{path::StoragePath, response::Result};
+use crate::{
+    path::StoragePath,
+    response::{Error, Result},
+};
 
 use super::AppState;
 
@@ -28,6 +31,10 @@ impl AppState {
         path_storage: StoragePath,
         file_info: FileInfo,
     ) -> Result<()> {
+        if !path_storage.is_file() {
+            return Err(Error::InvalidFilePath(path_storage));
+        }
+
         let path_copy = self.path_files.join(&file_info.hash_sha256);
         let path_storage = path_storage.to_str();
         let timestamp = Utc::now().to_rfc3339();
@@ -133,7 +140,10 @@ mod tests {
         time::sleep,
     };
 
-    use crate::{database::AppState, response::Result};
+    use crate::{
+        database::AppState,
+        response::{Error, Result},
+    };
 
     use super::FileInfo;
 
@@ -605,6 +615,52 @@ mod tests {
 
         let insertion_timestamp = DateTime::parse_from_rfc3339(&inserted_path.valid_since)?;
         assert!(insertion_timestamp.with_timezone(&Utc) <= Utc::now());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_save_with_invalid_path() -> Result<()> {
+        let test_dir = TempDir::new().await?;
+        let database = AppState::new(test_dir.dir_path()).await?;
+        let file_content = b"hello world!";
+
+        let (file, file_info) = create_dummy_file(file_content).await?;
+
+        let insert_to_root_result = database
+            .add_new_file_to_storage(file.file_path(), "".into(), file_info.clone())
+            .await;
+
+        assert!(insert_to_root_result.is_err());
+        assert!(matches!(
+            insert_to_root_result
+                .err()
+                .expect("The result must be an error."),
+            Error::InvalidFilePath { .. }
+        ));
+
+        let insert_to_directory_result = database
+            .add_new_file_to_storage(
+                file.file_path(),
+                "path/to/some/folder/".into(),
+                file_info.clone(),
+            )
+            .await;
+
+        assert!(insert_to_directory_result.is_err());
+        assert!(matches!(
+            insert_to_directory_result
+                .err()
+                .expect("The result must be an error."),
+            Error::InvalidFilePath { .. }
+        ));
+
+        let dir_entry = fs::read_dir(database.path_files)
+            .await?
+            .next_entry()
+            .await?;
+
+        assert!(dir_entry.is_none());
 
         Ok(())
     }

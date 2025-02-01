@@ -9,6 +9,8 @@ use axum::{
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use crate::path::StoragePath;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -35,6 +37,9 @@ pub enum Error {
     #[error("multipart missing a field")]
     MultipartMissingField(String),
 
+    #[error("the given path is not a valid file path")]
+    InvalidFilePath(StoragePath),
+
     #[error("no file at the given path")]
     FileNotFound(PathBuf),
 
@@ -55,6 +60,7 @@ enum ApiErrorCode {
     InvalidTimestamp,
     MalformedMultipart,
     MultipartMissingField,
+    InvalidFilePath,
     FileNotFound,
     ArchiveGenerationFailed,
     UnknownError = u8::MAX,
@@ -142,6 +148,11 @@ impl<T> From<Error> for ApiResponse<T> {
                 StatusCode::BAD_REQUEST,
                 ApiErrorCode::MultipartMissingField,
                 format!("the field '{}' is missing from the multipart", field),
+            ),
+            Error::InvalidFilePath(path) => (
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::InvalidFilePath,
+                format!("the path '{}' does not point to a file", path.to_str())
             ),
             Error::FileNotFound(path) => (
                 StatusCode::NOT_FOUND,
