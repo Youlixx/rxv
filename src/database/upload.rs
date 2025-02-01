@@ -28,11 +28,11 @@ impl AppState {
     pub async fn add_new_file_to_storage(
         &self,
         path_file: impl AsRef<Path>,
-        path_storage: StoragePath,
+        path_storage: &StoragePath,
         file_info: FileInfo,
     ) -> Result<()> {
         if !path_storage.is_file() {
-            return Err(Error::InvalidFilePath(path_storage));
+            return Err(Error::InvalidFilePath(path_storage.clone()));
         }
 
         let path_copy = self.path_files.join(&file_info.hash_sha256);
@@ -142,6 +142,7 @@ mod tests {
 
     use crate::{
         database::AppState,
+        path::StoragePath,
         response::{Error, Result},
     };
 
@@ -205,7 +206,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                "my_files/helloworld.txt".into(),
+                &StoragePath::from("my_files/helloworld.txt"),
                 file_info.clone(),
             )
             .await?;
@@ -270,7 +271,11 @@ mod tests {
             let (file, file_info) = create_dummy_file(file_content).await?;
 
             database
-                .add_new_file_to_storage(file.file_path(), path_storage.into(), file_info.clone())
+                .add_new_file_to_storage(
+                    file.file_path(),
+                    &StoragePath::from(path_storage),
+                    file_info.clone(),
+                )
                 .await?;
 
             file_infos.push((*path_storage, *file_content, file_info));
@@ -343,11 +348,19 @@ mod tests {
         let (file, file_info) = create_dummy_file(file_content).await?;
 
         database
-            .add_new_file_to_storage(file.file_path(), storage_paths[0].into(), file_info.clone())
+            .add_new_file_to_storage(
+                file.file_path(),
+                &StoragePath::from(storage_paths[0]),
+                file_info.clone(),
+            )
             .await?;
 
         database
-            .add_new_file_to_storage(file.file_path(), storage_paths[1].into(), file_info.clone())
+            .add_new_file_to_storage(
+                file.file_path(),
+                &StoragePath::from(storage_paths[1]),
+                file_info.clone(),
+            )
             .await?;
 
         let inserted_files = sqlx::query!("SELECT * FROM files;")
@@ -409,7 +422,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file_base.file_path(),
-                "my_files/override_me.txt".into(),
+                &StoragePath::from("my_files/override_me.txt"),
                 file_base_info.clone(),
             )
             .await?;
@@ -420,7 +433,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file_over.file_path(),
-                "my_files/override_me.txt".into(),
+                &StoragePath::from("my_files/override_me.txt"),
                 file_over_info.clone(),
             )
             .await?;
@@ -500,7 +513,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                "my_files/helloworld.txt".into(),
+                &StoragePath::from("my_files/helloworld.txt"),
                 file_info.clone(),
             )
             .await?;
@@ -511,7 +524,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                "my_files/helloworld.txt".into(),
+                &StoragePath::from("my_files/helloworld.txt"),
                 file_info.clone(),
             )
             .await?;
@@ -579,7 +592,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                "my_files/helloworld.txt".into(),
+                &StoragePath::from("my_files/helloworld.txt"),
                 file_info.clone(),
             )
             .await?;
@@ -628,7 +641,7 @@ mod tests {
         let (file, file_info) = create_dummy_file(file_content).await?;
 
         let insert_to_root_result = database
-            .add_new_file_to_storage(file.file_path(), "".into(), file_info.clone())
+            .add_new_file_to_storage(file.file_path(), &StoragePath::from(""), file_info.clone())
             .await;
 
         assert!(insert_to_root_result.is_err());
@@ -642,7 +655,7 @@ mod tests {
         let insert_to_directory_result = database
             .add_new_file_to_storage(
                 file.file_path(),
-                "path/to/some/folder/".into(),
+                &StoragePath::from("path/to/some/folder/"),
                 file_info.clone(),
             )
             .await;

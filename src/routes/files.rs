@@ -202,7 +202,7 @@ async fn upload_file(
     storage
         .add_new_file_to_storage(
             temp_file.file_path(),
-            path.into(),
+            &StoragePath::from(path),
             file_info_builder
                 .build()
                 .ok_or(Error::MultipartMissingField("file".into()))?,

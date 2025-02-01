@@ -141,7 +141,7 @@ mod tests {
         database
             .add_new_file_to_storage(
                 file.file_path(),
-                path_storage.clone(),
+                path_storage,
                 FileInfo {
                     original_name: "some_file.txt".into(),
                     size_in_bytes: file_content.len() as i64,
