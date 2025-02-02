@@ -349,7 +349,7 @@ mod tests {
             .await?;
 
         database
-            .add_new_file_to_storage(file.file_path(), storage_paths[0], file_info.clone())
+            .add_new_file_to_storage(file.file_path(), storage_paths[1], file_info.clone())
             .await?;
 
         let inserted_files = sqlx::query!("SELECT * FROM files;")
