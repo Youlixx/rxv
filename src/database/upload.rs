@@ -190,12 +190,12 @@ mod tests {
         Ok(())
     }
 
-    /// Test checking that saving a single file to the storage works as
+    /// Test to verify that saving a single file to the storage works as
     /// intended.
     ///
-    /// The intended behavior is that both the paths and files table contain
-    /// exactly a single entry for the new file. The file should also be
-    /// present in the storage folder.
+    /// The expected behavior is that both the paths and files tables contain
+    /// exactly one entry for the new file. The file should also be present in
+    /// the storage folder.
     #[tokio::test]
     async fn test_save_single_file() -> Result<()> {
         let test_dir = TempDir::new().await?;
@@ -250,12 +250,12 @@ mod tests {
         Ok(())
     }
 
-    /// Test checking that saving several files without any path nor content
-    /// collision works as intended.
+    /// Test to verify that saving several files without any path or content
+    /// collisions works as intended.
     ///
-    /// The expected behavior is that all the saved files should be added in
-    /// the storage folder, each file should have a unique entry in both the
-    /// paths and files tables, and all the path should be live.
+    /// The expected behavior is that all saved files are added to the storage
+    /// folder, each file has a unique entry in both the paths and files tables,
+    /// and all paths are marked as live.
     #[tokio::test]
     async fn test_save_multiple_files() -> Result<()> {
         let test_dir = TempDir::new().await?;
@@ -328,13 +328,14 @@ mod tests {
         Ok(())
     }
 
-    /// Test checking that trying to save the same file multiple time does not
-    /// create redundant copy of the file in question.
+    /// Test to verify that saving the same file multiple times does not create
+    /// redundant copies of the file.
     ///
-    /// The intended behavior is for the database to first check if the new
-    /// file is not already present in its table (using the file sha256 as a
-    /// unique identifier). In which case an extra path pointing to the
-    /// existing file should be created while preserving the file table intact.
+    /// The expected behavior is that the database first checks if the new file
+    /// is already present in its table using the file's SHA-256 hash as a
+    /// unique identifier. If the file is already present, an additional path
+    /// pointing to the existing file should be created, while the file table
+    /// remains unchanged.
     #[tokio::test]
     async fn test_save_same_file() -> Result<()> {
         let test_dir = TempDir::new().await?;
@@ -392,10 +393,10 @@ mod tests {
         Ok(())
     }
 
-    /// Test checking that overriding a file correctly updates the path table.
+    /// Test to verify that overriding a file correctly updates the path table.
     ///
-    /// The expected behavior is that the old path gets invalidated at the same
-    /// time the new one becomes live, effectively replacing the old path with
+    /// The expected behavior is that the old path is invalidated at the same
+    /// time the new path becomes live, effectively replacing the old path with
     /// the new one.
     #[tokio::test]
     async fn test_override_existing_file() -> Result<()> {
@@ -485,12 +486,12 @@ mod tests {
         Ok(())
     }
 
-    /// Test checking that trying to upload the same file to the same path does
-    /// not modify the database at all.
+    /// Test to verify that uploading the same file to the same path does not
+    /// modify the database.
     ///
-    /// The expected behavior is for the path table to not be updated at all.
-    /// We want to avoid having to path pointing to the same file where on is
-    /// being invalidated at the exact same moment the other one becomes live.
+    /// The expected behavior is that the path table remains unchanged. This
+    /// avoids having two paths pointing to the same file, where one is
+    /// invalidated at the exact moment the other becomes live.
     #[tokio::test]
     async fn test_override_with_same_file() -> Result<()> {
         let test_dir = TempDir::new().await?;
@@ -556,14 +557,14 @@ mod tests {
         Ok(())
     }
 
-    /// Test checking that saving a file already present in the storage FS but
-    /// not registered in the database fixes itself.
+    /// Test to verify that saving a file already present in the storage
+    /// filesystem but not registered in the database corrects the issue.
     ///
-    /// This test is for completeness, this edge case should never occur unless
-    /// the database got corrupted (in which case, doing a full database sanity
-    /// check would be the best course of action). In such scenario, the
-    /// database is supposed to fix the file table by itself by adding an entry
-    /// for the missing file.
+    /// This test covers an edge case that should never occur unless the
+    /// database becomes corrupted. In such a scenario, the best course of
+    /// action would be to perform a full database sanity check. The database
+    /// should automatically fix the file table by adding an entry for the
+    /// missing file.
     #[tokio::test]
     async fn test_save_existing_file_missing_from_database() -> Result<()> {
         let test_dir = TempDir::new().await?;
@@ -621,6 +622,11 @@ mod tests {
         Ok(())
     }
 
+    /// Test to verify that attempting to save a file with an invalid path
+    /// fails.
+    ///
+    /// The expected behavior is that an error is returned when the given path
+    /// points to the root or a folder instead of a file.
     #[tokio::test]
     async fn test_save_with_invalid_path() -> Result<()> {
         let test_dir = TempDir::new().await?;
