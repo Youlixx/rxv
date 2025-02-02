@@ -48,13 +48,14 @@ impl AppState {
     /// recursively retrieves all files, including those in sub-folders.
     pub async fn get_file_paths(
         &self,
-        base_path: &StoragePath,
+        path_storage: impl Into<StoragePath>,
         timestamp: DateTime<Utc>,
     ) -> Result<StoragePaths> {
+        let path_storage: StoragePath = path_storage.into();
         let timestamp = timestamp.to_rfc3339();
 
-        let files = if base_path.is_dir() {
-            let path_wildcard = base_path.get_sql_matching_pattern();
+        let files = if path_storage.is_dir() {
+            let path_wildcard = path_storage.get_sql_matching_pattern();
             let query = sqlx::query!(
                 "
                 SELECT files.sha256_hash, paths.path FROM files
@@ -81,8 +82,7 @@ impl AppState {
                 .collect::<Vec<_>>()
                 .into()
         } else {
-            let storage_relative_path_file = base_path.to_str();
-
+            let path_storage = path_storage.to_str();
             let query = sqlx::query!(
                 "
                 SELECT files.sha256_hash FROM files
@@ -93,7 +93,7 @@ impl AppState {
                 ",
                 timestamp,
                 timestamp,
-                storage_relative_path_file
+                path_storage
             );
 
             query
@@ -126,7 +126,7 @@ mod tests {
     async fn add_file_to_storage(
         database: &AppState,
         file_content: &[u8],
-        path_storage: &StoragePath,
+        path_storage: impl Into<StoragePath>,
     ) -> Result<PathBuf> {
         let mut file = TempFile::new().await?;
         file.write(file_content).await?;
@@ -165,9 +165,10 @@ mod tests {
         let database = AppState::new(test_dir.dir_path()).await?;
 
         let path_storage = StoragePath::from("my_files/helloworld.txt");
-        let path_file = add_file_to_storage(&database, b"hello world!", &path_storage).await?;
+        let path_file =
+            add_file_to_storage(&database, b"hello world!", path_storage.clone()).await?;
 
-        let paths = database.get_file_paths(&path_storage, Utc::now()).await?;
+        let paths = database.get_file_paths(path_storage, Utc::now()).await?;
 
         assert!(matches!(paths, StoragePaths::File { .. }));
 
@@ -198,14 +199,11 @@ mod tests {
 
         let mut file_paths = HashMap::new();
         for (path_storage, file_content) in file_contents {
-            let path_storage = StoragePath::from(path_storage);
-            let path_file = add_file_to_storage(&database, file_content, &path_storage).await?;
+            let path_file = add_file_to_storage(&database, file_content, path_storage).await?;
             file_paths.insert(path_storage, path_file);
         }
 
-        let paths = database
-            .get_file_paths(&StoragePath::from("my_files/"), Utc::now())
-            .await?;
+        let paths = database.get_file_paths("my_files/", Utc::now()).await?;
 
         assert!(matches!(paths, StoragePaths::Directory { .. }));
 
@@ -213,7 +211,7 @@ mod tests {
             assert_eq!(paths.len(), 2);
 
             paths.into_iter().for_each(|(path_file, path_storage)| {
-                let expected_path = file_paths.remove(&path_storage);
+                let expected_path = file_paths.remove(path_storage.to_str());
 
                 assert!(expected_path.is_some());
                 assert_eq!(
@@ -241,11 +239,10 @@ mod tests {
         let database = AppState::new(test_dir.dir_path()).await?;
 
         let path_storage = StoragePath::from("my_files/helloworld.txt");
-        let path_file = add_file_to_storage(&database, b"hello world!", &path_storage).await?;
+        let path_file =
+            add_file_to_storage(&database, b"hello world!", path_storage.clone()).await?;
 
-        let paths = database
-            .get_file_paths(&StoragePath::from("my_files/"), Utc::now())
-            .await?;
+        let paths = database.get_file_paths("my_files/", Utc::now()).await?;
 
         assert!(matches!(paths, StoragePaths::Directory { .. }));
 
@@ -280,14 +277,11 @@ mod tests {
 
         let mut file_paths = HashMap::new();
         for (path_storage, file_content) in &file_contents {
-            let path_storage = StoragePath::from(path_storage);
-            let path_file = add_file_to_storage(&database, file_content, &path_storage).await?;
-            file_paths.insert(path_storage, path_file);
+            let path_file = add_file_to_storage(&database, file_content, path_storage).await?;
+            file_paths.insert(*path_storage, path_file);
         }
 
-        let paths = database
-            .get_file_paths(&StoragePath::from(""), Utc::now())
-            .await?;
+        let paths = database.get_file_paths("", Utc::now()).await?;
 
         assert!(matches!(paths, StoragePaths::Directory { .. }));
 
@@ -295,7 +289,7 @@ mod tests {
             assert_eq!(paths.len(), file_contents.len());
 
             paths.into_iter().for_each(|(path_file, path_storage)| {
-                let expected_path = file_paths.remove(&path_storage);
+                let expected_path = file_paths.remove(path_storage.to_str());
 
                 assert!(expected_path.is_some());
                 assert_eq!(
@@ -319,19 +313,15 @@ mod tests {
         let test_dir = TempDir::new().await?;
         let database = AppState::new(test_dir.dir_path()).await?;
 
-        let path_storage = StoragePath::from("my_files/helloworld.txt");
-        add_file_to_storage(&database, b"hello world!", &path_storage).await?;
+        add_file_to_storage(&database, b"hello world!", "my_files/helloworld.txt").await?;
 
         let paths = database
-            .get_file_paths(&StoragePath::from("some_directory/"), Utc::now())
+            .get_file_paths("some_directory/", Utc::now())
             .await?;
 
         assert!(matches!(paths, StoragePaths::None));
 
-        let paths = database
-            .get_file_paths(&StoragePath::from("some_file.txt"), Utc::now())
-            .await?;
-
+        let paths = database.get_file_paths("some_file.txt", Utc::now()).await?;
         assert!(matches!(paths, StoragePaths::None));
 
         Ok(())
@@ -348,22 +338,22 @@ mod tests {
     async fn test_get_file_with_timestamp() -> Result<()> {
         let test_dir = TempDir::new().await?;
         let database = AppState::new(test_dir.dir_path()).await?;
-        let path_storage = StoragePath::from("my_files/helloworld.txt");
+        let path_storage = "my_files/helloworld.txt";
 
         let time_stamp_0 = Utc::now();
         sleep(Duration::from_millis(10)).await;
 
-        let path_file_0 = add_file_to_storage(&database, b"hello world!", &path_storage).await?;
+        let path_file_0 = add_file_to_storage(&database, b"hello world!", path_storage).await?;
 
         let time_stamp_1 = Utc::now();
         sleep(Duration::from_millis(10)).await;
 
-        let path_file_1 = add_file_to_storage(&database, b"different file!", &path_storage).await?;
+        let path_file_1 = add_file_to_storage(&database, b"different file!", path_storage).await?;
 
-        let paths = database.get_file_paths(&path_storage, time_stamp_0).await?;
+        let paths = database.get_file_paths(path_storage, time_stamp_0).await?;
         assert!(matches!(paths, StoragePaths::None));
 
-        let paths = database.get_file_paths(&path_storage, time_stamp_1).await?;
+        let paths = database.get_file_paths(path_storage, time_stamp_1).await?;
         assert!(matches!(paths, StoragePaths::File { .. }));
 
         if let StoragePaths::File(path) = paths {
@@ -395,20 +385,20 @@ mod tests {
     async fn test_get_directory_with_timestamp() -> Result<()> {
         let test_dir = TempDir::new().await?;
         let database = AppState::new(test_dir.dir_path()).await?;
-        let path_storage = StoragePath::from("my_files/");
+        let path_storage = "my_files/";
 
         let time_stamp_0 = Utc::now();
         sleep(Duration::from_millis(10)).await;
 
         let path_storage_0 = StoragePath::from("my_files/helloworld.txt");
-        let path_file_0 = add_file_to_storage(&database, b"hello world!", &path_storage_0).await?;
+        let path_file_0 = add_file_to_storage(&database, b"hello world!", path_storage_0.clone()).await?;
 
         let time_stamp_1 = Utc::now();
         sleep(Duration::from_millis(10)).await;
 
         let path_storage_1 = StoragePath::from("my_files/another_file.txt");
         let path_file_1 =
-            add_file_to_storage(&database, b"different file!", &path_storage_1).await?;
+            add_file_to_storage(&database, b"different file!", path_storage_1.clone()).await?;
 
         let paths = database.get_file_paths(&path_storage, time_stamp_0).await?;
         assert!(matches!(paths, StoragePaths::None));

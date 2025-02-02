@@ -65,7 +65,7 @@ async fn download_file(
     };
 
     let files = storage
-        .get_file_paths(&path, time_point.try_into()?)
+        .get_file_paths(path.clone(), time_point.try_into()?)
         .await?;
 
     let mut response_builder = Response::builder();
@@ -200,7 +200,7 @@ async fn upload_file(
     storage
         .add_new_file_to_storage(
             temp_file.file_path(),
-            &StoragePath::from(path),
+            path,
             file_info_builder
                 .build()
                 .ok_or(Error::MultipartMissingField("file".into()))?,
