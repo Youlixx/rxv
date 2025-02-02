@@ -164,9 +164,8 @@ mod tests {
         let test_dir = TempDir::new().await?;
         let database = AppState::new(test_dir.dir_path()).await?;
 
-        let path_storage = StoragePath::from("my_files/helloworld.txt");
-        let path_file =
-            add_file_to_storage(&database, b"hello world!", path_storage.clone()).await?;
+        let path_storage = "my_files/helloworld.txt";
+        let path_file = add_file_to_storage(&database, b"hello world!", path_storage).await?;
 
         let paths = database.get_file_paths(path_storage, Utc::now()).await?;
 
@@ -238,9 +237,8 @@ mod tests {
         let test_dir = TempDir::new().await?;
         let database = AppState::new(test_dir.dir_path()).await?;
 
-        let path_storage = StoragePath::from("my_files/helloworld.txt");
-        let path_file =
-            add_file_to_storage(&database, b"hello world!", path_storage.clone()).await?;
+        let path_storage = "my_files/helloworld.txt";
+        let path_file = add_file_to_storage(&database, b"hello world!", path_storage).await?;
 
         let paths = database.get_file_paths("my_files/", Utc::now()).await?;
 
@@ -251,7 +249,7 @@ mod tests {
 
             let path = paths.first().expect("The option cannot be None.");
             assert_eq!(path.0, path_file);
-            assert_eq!(path.1, path_storage);
+            assert_eq!(path.1.to_str(), path_storage);
         } else {
             unreachable!();
         }
@@ -390,15 +388,15 @@ mod tests {
         let time_stamp_0 = Utc::now();
         sleep(Duration::from_millis(10)).await;
 
-        let path_storage_0 = StoragePath::from("my_files/helloworld.txt");
-        let path_file_0 = add_file_to_storage(&database, b"hello world!", path_storage_0.clone()).await?;
+        let path_storage_0 = "my_files/helloworld.txt";
+        let path_file_0 = add_file_to_storage(&database, b"hello world!", path_storage_0).await?;
 
         let time_stamp_1 = Utc::now();
         sleep(Duration::from_millis(10)).await;
 
-        let path_storage_1 = StoragePath::from("my_files/another_file.txt");
+        let path_storage_1 = "my_files/another_file.txt";
         let path_file_1 =
-            add_file_to_storage(&database, b"different file!", path_storage_1.clone()).await?;
+            add_file_to_storage(&database, b"different file!", path_storage_1).await?;
 
         let paths = database.get_file_paths(&path_storage, time_stamp_0).await?;
         assert!(matches!(paths, StoragePaths::None));
@@ -411,7 +409,7 @@ mod tests {
 
             let path = paths.first().expect("The option cannot be None.");
             assert_eq!(path.0, path_file_0);
-            assert_eq!(path.1, path_storage_0);
+            assert_eq!(path.1.to_str(), path_storage_0);
         } else {
             unreachable!();
         }
@@ -433,10 +431,10 @@ mod tests {
             };
 
             assert_eq!(path_0.0, path_file_0);
-            assert_eq!(path_0.1, path_storage_0);
+            assert_eq!(path_0.1.to_str(), path_storage_0);
 
             assert_eq!(path_1.0, path_file_1);
-            assert_eq!(path_1.1, path_storage_1);
+            assert_eq!(path_1.1.to_str(), path_storage_1);
         } else {
             unreachable!();
         }
