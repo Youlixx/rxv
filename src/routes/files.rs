@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use async_tempfile::TempFile;
 use axum::{
     body::Body,
@@ -73,7 +71,7 @@ async fn download_file(
     let mut response_builder = Response::builder();
 
     let body = match files {
-        StoragePaths::None => return Err(Error::FileNotFound(PathBuf::from(path.to_str()))),
+        StoragePaths::None => return Err(Error::FileNotFound(path)),
         StoragePaths::File(path) => Body::from_stream(ReaderStream::new(File::open(path).await?)),
         StoragePaths::Directory(files) => {
             let buffer = TempFile::new().await?;
@@ -228,7 +226,7 @@ async fn delete_file(
     ExtractPath(path): ExtractPath<String>,
 ) -> ApiResult<()> {
     storage
-        .delete_file_from_storage(&path)
+        .delete_file_from_storage(path)
         .await
         .map(|_| ApiResponse::success(()))
 }

@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf};
+use std::io;
 
 use axum::{
     extract::multipart::MultipartError,
@@ -41,7 +41,7 @@ pub enum Error {
     InvalidFilePath(StoragePath),
 
     #[error("no file at the given path")]
-    FileNotFound(PathBuf),
+    FileNotFound(StoragePath),
 
     #[error("could not build the archive")]
     ArchiveGenerationFailed,
@@ -157,10 +157,7 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::FileNotFound(path) => (
                 StatusCode::NOT_FOUND,
                 ApiErrorCode::FileNotFound,
-                format!(
-                    "the path '{}' does not point to a live file",
-                    path.to_string_lossy()
-                ),
+                format!("the path '{}' does not point to a live file", path.to_str()),
             ),
             Error::ArchiveGenerationFailed => (
                 StatusCode::INTERNAL_SERVER_ERROR,
