@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT * FROM paths;",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "file_id",
+        "ordinal": 1,
+        "type_info": "Int64"
+      },
+      {
+        "name": "path",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "valid_since",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "valid_until",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "9863ca2f5403e8ff1903f2d5c078125c132b71ff73c41f8b4f0ac49acd147489"
+}

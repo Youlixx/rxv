@@ -274,7 +274,9 @@ mod tests {
             panic!("The function returned the wrong error variant.");
         }
 
-        database.delete_file_from_storage("my_files/nested/").await?;
+        database
+            .delete_file_from_storage("my_files/nested/")
+            .await?;
 
         let path_storage = "my_files/nested/helloworld.txt";
         let error = database.delete_file_from_storage(path_storage).await;
