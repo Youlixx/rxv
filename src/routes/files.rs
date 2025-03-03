@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use async_tempfile::TempFile;
 use axum::{
     body::Body,
@@ -18,7 +16,7 @@ use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    database::{AppState, FileInfo, FileList},
+    database::{download::StoragePaths, upload::FileInfo, AppState},
     path::StoragePath,
     response::{ApiResponse, ApiResult, Error, Result},
 };
@@ -67,15 +65,15 @@ async fn download_file(
     };
 
     let files = storage
-        .get_file_paths(&path, time_point.try_into()?)
+        .get_file_paths(path.clone(), time_point.try_into()?)
         .await?;
 
     let mut response_builder = Response::builder();
 
     let body = match files {
-        FileList::None => return Err(Error::FileNotFound(PathBuf::from(path.to_str()))),
-        FileList::SingleFile(path) => Body::from_stream(ReaderStream::new(File::open(path).await?)),
-        FileList::MultipleFile(files) => {
+        StoragePaths::None => return Err(Error::FileNotFound(path)),
+        StoragePaths::File(path) => Body::from_stream(ReaderStream::new(File::open(path).await?)),
+        StoragePaths::Directory(files) => {
             let buffer = TempFile::new().await?;
             let mut builder = Builder::new(buffer);
 
@@ -202,7 +200,7 @@ async fn upload_file(
     storage
         .add_new_file_to_storage(
             temp_file.file_path(),
-            &path,
+            path,
             file_info_builder
                 .build()
                 .ok_or(Error::MultipartMissingField("file".into()))?,
@@ -228,7 +226,7 @@ async fn delete_file(
     ExtractPath(path): ExtractPath<String>,
 ) -> ApiResult<()> {
     storage
-        .delete_file_from_storage(&path)
+        .delete_file_from_storage(path)
         .await
         .map(|_| ApiResponse::success(()))
 }

@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf};
+use std::io;
 
 use axum::{
     extract::multipart::MultipartError,
@@ -8,6 +8,8 @@ use axum::{
 };
 use serde::Serialize;
 use utoipa::ToSchema;
+
+use crate::path::StoragePath;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -35,8 +37,11 @@ pub enum Error {
     #[error("multipart missing a field")]
     MultipartMissingField(String),
 
+    #[error("the given path is not a valid file path")]
+    InvalidFilePath(StoragePath),
+
     #[error("no file at the given path")]
-    FileNotFound(PathBuf),
+    FileNotFound(StoragePath),
 
     #[error("could not build the archive")]
     ArchiveGenerationFailed,
@@ -55,6 +60,7 @@ enum ApiErrorCode {
     InvalidTimestamp,
     MalformedMultipart,
     MultipartMissingField,
+    InvalidFilePath,
     FileNotFound,
     ArchiveGenerationFailed,
     UnknownError = u8::MAX,
@@ -113,7 +119,7 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::Http(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 ApiErrorCode::ServerSideHttpFailure,
-                format!("a server-side HTTP error occured: {}", error),
+                format!("a server-side HTTP error occurred: {}", error),
             ),
             Error::Sql(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -123,7 +129,7 @@ impl<T> From<Error> for ApiResponse<T> {
             Error::TempFile(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 ApiErrorCode::ServerSideTempFileFailure,
-                format!("a server-side temp file error occured: {}", error),
+                format!("a server-side temp file error occurred: {}", error),
             ),
             Error::TimestampParseError(error) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -143,13 +149,15 @@ impl<T> From<Error> for ApiResponse<T> {
                 ApiErrorCode::MultipartMissingField,
                 format!("the field '{}' is missing from the multipart", field),
             ),
+            Error::InvalidFilePath(path) => (
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::InvalidFilePath,
+                format!("the path '{}' does not point to a file", path.to_str()),
+            ),
             Error::FileNotFound(path) => (
                 StatusCode::NOT_FOUND,
                 ApiErrorCode::FileNotFound,
-                format!(
-                    "the path '{}' does not point to a live file",
-                    path.to_string_lossy()
-                ),
+                format!("the path '{}' does not point to a live file", path.to_str()),
             ),
             Error::ArchiveGenerationFailed => (
                 StatusCode::INTERNAL_SERVER_ERROR,

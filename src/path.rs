@@ -5,7 +5,7 @@ use std::path::PathBuf;
 /// A simple wrapper around a [`String`], representing a path relative to the
 /// storage. It allows to perform simple path manipulation within the storage
 /// space.
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Eq, PartialEq, Default, Hash)]
 pub struct StoragePath(String);
 
 impl StoragePath {
