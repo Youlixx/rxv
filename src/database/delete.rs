@@ -69,7 +69,7 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     use crate::{
-        database::{upload::FileInfo, AppState},
+        database::{AppState, upload::FileInfo},
         path::StoragePath,
         response::{Error, Result},
     };
