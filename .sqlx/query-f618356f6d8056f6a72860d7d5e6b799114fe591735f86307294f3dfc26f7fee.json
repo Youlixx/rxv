@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT files.hash FROM files\n            INNER JOIN paths ON files.id == paths.file_id\n            WHERE ? >= paths.valid_since\n                AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')\n                AND paths.path == ?;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "hash",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f618356f6d8056f6a72860d7d5e6b799114fe591735f86307294f3dfc26f7fee"
+}
