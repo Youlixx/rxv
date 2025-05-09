@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            CREATE TABLE IF NOT EXISTS files (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                original_file_name TEXT NOT NULL,\n                size INTEGER NOT NULL,\n                hash TEXT NOT NULL,\n                upload_date TEXT NOT NULL\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "331216d59dd60ca619e3257bac62b3e0d280e59f0d7d5a9528ab298be723ab85"
+}

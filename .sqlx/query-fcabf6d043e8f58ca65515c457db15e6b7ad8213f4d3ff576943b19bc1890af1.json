@@ -19,18 +19,13 @@
         "type_info": "Int64"
       },
       {
-        "name": "md5_hash",
+        "name": "hash",
         "ordinal": 3,
         "type_info": "Text"
       },
       {
-        "name": "sha256_hash",
-        "ordinal": 4,
-        "type_info": "Text"
-      },
-      {
         "name": "upload_date",
-        "ordinal": 5,
+        "ordinal": 4,
         "type_info": "Text"
       }
     ],
@@ -38,7 +33,6 @@
       "Right": 0
     },
     "nullable": [
-      false,
       false,
       false,
       false,

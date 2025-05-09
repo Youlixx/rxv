@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!\" FROM files WHERE sha256_hash = ?;",
+  "query": "SELECT id as \"id!\" FROM files WHERE hash = ?;",
   "describe": {
     "columns": [
       {
@@ -13,8 +13,8 @@
       "Right": 1
     },
     "nullable": [
-      true
+      false
     ]
   },
-  "hash": "e8a70f6802f1c0077d4508fa38526339cff671a0ff97d50505233578d65d1847"
+  "hash": "763613457cf50cad96422ffd656548e01a033be8538ed16baf7af4d1b6d99033"
 }
