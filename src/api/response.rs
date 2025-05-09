@@ -134,12 +134,12 @@ impl<T> From<ApiError> for ApiResponse<T> {
             ApiError::MalformedMultipartForm(error) => (
                 StatusCode::BAD_REQUEST,
                 ApiErrorCode::MalformedMultipartForm,
-                format!("Malformed multipart form: {}", error)
+                format!("Malformed multipart form: {}", error),
             ),
             ApiError::MultipartMissingField(field) => (
                 StatusCode::BAD_REQUEST,
                 ApiErrorCode::MalformedMultipartForm,
-                format!("Missing field '{}' from the multipart form", field)
+                format!("Missing field '{}' from the multipart form", field),
             ),
             ApiError::Database(Error::Unknown(error)) => (
                 StatusCode::INTERNAL_SERVER_ERROR,

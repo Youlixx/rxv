@@ -11,7 +11,7 @@ pub mod response;
 #[derive(OpenApi)]
 #[openapi(
     tags(
-        (name = "files", description = "Todo items management API")
+        (name = "files", description = "Files operations")
     )
 )]
 struct ApiDoc;
