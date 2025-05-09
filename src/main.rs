@@ -1,36 +1,15 @@
-mod database;
-mod path;
-mod response;
-mod routes;
-
-use routes::files;
-
-use database::AppState;
+use api::get_router;
+use database::FileDatabase;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
-use utoipa::OpenApi;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_swagger_ui::SwaggerUi;
 
-#[derive(OpenApi)]
-#[openapi(
-    // modifiers(&SecurityAddon),
-    tags(
-        (name = "yo", description = "Todo items management API")
-    )
-)]
-struct ApiDoc;
+mod api;
+mod database;
 
 #[tokio::main]
 async fn main() {
-    let state = AppState::new("/storage").await.unwrap();
-
-    let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .merge(files::router(state.clone()))
-        .split_for_parts();
-
-    let router =
-        router.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api.clone()));
+    let database = FileDatabase::open("/storage").await.unwrap();
+    let router = get_router(database);
 
     let address = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 8000));
     let listener = TcpListener::bind(&address).await.unwrap();
