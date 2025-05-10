@@ -47,6 +47,7 @@ impl From<io::Error> for ApiError {
 enum ApiErrorCode {
     Internal = 0,
     NotAFile,
+    NotADirectory,
     FileNotFound,
     InvalidTimestamp,
     MalformedMultipartForm,
@@ -118,6 +119,14 @@ impl<T> From<ApiError> for ApiResponse<T> {
                 ApiErrorCode::NotAFile,
                 format!(
                     "The given path should point to a file ({} points to a directory)",
+                    path.path()
+                ),
+            ),
+            ApiError::Database(Error::NotAVirtualDirectory(path)) => (
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::NotADirectory,
+                format!(
+                    "The given path should point to a directory ({} points to a file)",
                     path.path()
                 ),
             ),

@@ -19,6 +19,8 @@ use crate::database::{
     virtual_path::VirtualPath,
 };
 
+mod tree;
+
 use super::response::{ApiError, ApiResponse, ApiResult, Result};
 
 const ROOT_ARCHIVE_NAME: &str = "archive";
@@ -27,6 +29,9 @@ pub fn router(database: FileDatabase) -> OpenApiRouter {
     OpenApiRouter::new()
         .route("/files/", get(get_file))
         .routes(routes!(get_file, save_file, delete_file))
+        .route("/tree/", get(tree::endpoint_tree))
+        .routes(routes!(tree::endpoint_tree))
+        .routes(routes!(tree::endpoint_metadata))
         .with_state(database)
 }
 
