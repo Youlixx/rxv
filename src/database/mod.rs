@@ -12,6 +12,7 @@ pub mod virtual_path;
 
 pub mod delete_file;
 pub mod get_file;
+pub mod get_metadata;
 pub mod save_file;
 
 #[derive(Debug, Clone)]

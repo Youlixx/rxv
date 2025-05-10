@@ -34,6 +34,9 @@ pub enum Error {
     #[error("the virtual path must point to a file")]
     NotAVirtualFile(VirtualPath),
 
+    #[error("the virtual path must point to a directory")]
+    NotAVirtualDirectory(VirtualPath),
+
     #[error("the virtual file could not be found")]
     VirtualFileNotFound(VirtualPath),
 
