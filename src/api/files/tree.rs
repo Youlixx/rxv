@@ -50,9 +50,7 @@ impl FileTree {
     }
 
     fn insert_file(&mut self, entry: PathMetadataPair, prefix: &str) {
-        let components = entry
-            .virtual_path
-            .path()[prefix.len()..]
+        let components = entry.virtual_path.path()[prefix.len()..]
             .split(VirtualPath::SEPARATOR)
             .collect::<Vec<_>>();
 
@@ -141,12 +139,14 @@ pub async fn endpoint_metadata(
     Query(timestamp): Query<RequestTimestamp>,
 ) -> ApiResult<SerializableMetadata> {
     let virtual_path = VirtualPath::from(path.0);
-    let metadata = database.get_file_metadata(virtual_path, timestamp.try_into()?).await?;
+    let metadata = database
+        .get_file_metadata(virtual_path, timestamp.try_into()?)
+        .await?;
 
     Ok(ApiResponse::success(SerializableMetadata {
         original_file_name: metadata.metadata.original_file_name,
         size_in_bytes: metadata.metadata.size_in_bytes,
         hash: metadata.metadata.hash,
-        upload_timestamp: metadata.upload_timestamp.to_rfc3339()
+        upload_timestamp: metadata.upload_timestamp.to_rfc3339(),
     }))
 }
