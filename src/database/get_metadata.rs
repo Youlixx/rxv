@@ -124,12 +124,31 @@ impl<T: TimeProvider> FileDatabase<T> {
 #[cfg(test)]
 mod tests {
     use crate::database::{
+        TimeProvider,
         error::{Error, Result},
         get_metadata::PathMetadataPair,
         save_file::FileMetadata,
-        tests::{FileOperation, get_hash, get_timestamp, setup_test_database},
+        tests::{FileOperation, TestDatabase, get_hash, get_timestamp, setup_test_database},
         virtual_path::VirtualPath,
     };
+
+    impl TestDatabase {
+        async fn get_file_metadata_at_internal_timestamp(
+            &self,
+            virtual_path: VirtualPath,
+        ) -> Result<PathMetadataPair> {
+            self.get_file_metadata(virtual_path, self.time_provider.now())
+                .await
+        }
+
+        async fn get_tree_metadata_at_internal_timestamp(
+            &self,
+            virtual_path: impl Into<VirtualPath>,
+        ) -> Result<Vec<PathMetadataPair>> {
+            self.get_tree_metadata(virtual_path, self.time_provider.now())
+                .await
+        }
+    }
 
     /// Test to verify that getting a single file metadata returns the expected result.
     #[tokio::test]
@@ -147,7 +166,7 @@ mod tests {
 
         assert_eq!(
             database
-                .get_file_metadata(path.clone(), get_timestamp(1))
+                .get_file_metadata_at_internal_timestamp(path.clone())
                 .await?,
             PathMetadataPair {
                 virtual_path: path,
@@ -170,7 +189,7 @@ mod tests {
         let (_test_dir, database) = setup_test_database(vec![]).await?;
 
         let get_metadata_result = database
-            .get_file_metadata(path.clone(), get_timestamp(1))
+            .get_file_metadata_at_internal_timestamp(path.clone())
             .await;
 
         assert!(get_metadata_result.is_err());
@@ -190,7 +209,7 @@ mod tests {
         let (_test_dir, database) = setup_test_database(vec![]).await?;
 
         let get_metadata_result = database
-            .get_file_metadata(path.clone(), get_timestamp(1))
+            .get_file_metadata_at_internal_timestamp(path.clone())
             .await;
 
         assert!(get_metadata_result.is_err());
@@ -281,14 +300,14 @@ mod tests {
 
         assert_eq!(
             database
-                .get_tree_metadata(VirtualPath::from("/my_files/"), get_timestamp(5))
+                .get_tree_metadata_at_internal_timestamp(VirtualPath::from("/my_files/"))
                 .await?,
             expected_file_metadata[..2]
         );
 
         assert_eq!(
             database
-                .get_tree_metadata(VirtualPath::default(), get_timestamp(5))
+                .get_tree_metadata_at_internal_timestamp(VirtualPath::default())
                 .await?,
             expected_file_metadata
         );
@@ -303,7 +322,7 @@ mod tests {
         let (_test_dir, database) = setup_test_database(vec![]).await?;
 
         let get_metadata_result = database
-            .get_tree_metadata(path.clone(), get_timestamp(1))
+            .get_tree_metadata_at_internal_timestamp(path.clone())
             .await;
 
         assert!(get_metadata_result.is_err());
@@ -320,11 +339,10 @@ mod tests {
     /// file list.
     #[tokio::test]
     async fn test_get_empty_root_metadata() -> Result<()> {
-        let path = VirtualPath::default();
         let (_test_dir, database) = setup_test_database(vec![]).await?;
 
         let get_metadata_result = database
-            .get_tree_metadata(path.clone(), get_timestamp(1))
+            .get_tree_metadata_at_internal_timestamp(VirtualPath::default())
             .await?;
 
         assert!(get_metadata_result.is_empty());
@@ -339,7 +357,7 @@ mod tests {
         let (_test_dir, database) = setup_test_database(vec![]).await?;
 
         let get_metadata_result = database
-            .get_tree_metadata(path.clone(), get_timestamp(1))
+            .get_tree_metadata_at_internal_timestamp(path.clone())
             .await;
 
         assert!(get_metadata_result.is_err());

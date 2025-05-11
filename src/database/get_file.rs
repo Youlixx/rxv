@@ -124,11 +124,21 @@ impl<T: TimeProvider> FileDatabase<T> {
 #[cfg(test)]
 mod tests {
     use crate::database::{
+        TimeProvider,
         error::Result,
         get_file::{FileEntries, FileEntry},
-        tests::{FileOperation, get_hash, get_timestamp, setup_test_database},
+        tests::{FileOperation, TestDatabase, get_hash, get_timestamp, setup_test_database},
         virtual_path::VirtualPath,
     };
+
+    impl TestDatabase {
+        async fn get_file_at_internal_timestamp(
+            &self,
+            virtual_path: impl Into<VirtualPath>,
+        ) -> Result<FileEntries> {
+            self.get_file(virtual_path, self.time_provider.now()).await
+        }
+    }
 
     /// Test to verify that getting a single file returns the expected path.
     ///
@@ -148,7 +158,9 @@ mod tests {
         .await?;
 
         assert_eq!(
-            database.get_file(path.clone(), get_timestamp(1)).await?,
+            database
+                .get_file_at_internal_timestamp(path.clone())
+                .await?,
             FileEntries::SingleFile(FileEntry {
                 path_physical_file: database.get_physical_file_path(&get_hash(&content)),
                 virtual_path: path
@@ -197,7 +209,7 @@ mod tests {
 
         assert_eq!(
             database
-                .get_file(VirtualPath::from("/my_files/"), get_timestamp(4))
+                .get_file_at_internal_timestamp(VirtualPath::from("/my_files/"))
                 .await?,
             FileEntries::MultipleFiles(vec![
                 FileEntry {
@@ -235,7 +247,7 @@ mod tests {
 
         assert_eq!(
             database
-                .get_file(VirtualPath::from("/my_files/"), get_timestamp(1))
+                .get_file_at_internal_timestamp(VirtualPath::from("/my_files/"))
                 .await?,
             FileEntries::MultipleFiles(vec![FileEntry {
                 path_physical_file: database.get_physical_file_path(&get_hash(&content)),
@@ -283,7 +295,7 @@ mod tests {
 
         assert_eq!(
             database
-                .get_file(VirtualPath::from("/"), get_timestamp(4))
+                .get_file_at_internal_timestamp(VirtualPath::from("/"))
                 .await?,
             FileEntries::MultipleFiles(
                 files
@@ -321,24 +333,21 @@ mod tests {
 
         assert_eq!(
             database
-                .get_file(VirtualPath::from("/my_files/unknown.txt"), get_timestamp(2))
+                .get_file_at_internal_timestamp(VirtualPath::from("/my_files/unknown.txt"))
                 .await?,
             FileEntries::None
         );
 
         assert_eq!(
             database
-                .get_file(VirtualPath::from("/unknown_dir/"), get_timestamp(2))
+                .get_file_at_internal_timestamp(VirtualPath::from("/unknown_dir/"))
                 .await?,
             FileEntries::None
         );
 
         assert_eq!(
             database
-                .get_file(
-                    VirtualPath::from("/my_new_file.txt"),
-                    get_timestamp(0)
-                )
+                .get_file(VirtualPath::from("/my_new_file.txt"), get_timestamp(0))
                 .await?,
             FileEntries::None
         );
