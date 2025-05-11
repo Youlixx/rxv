@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, file_id, valid_since FROM paths\n            WHERE path = ? AND valid_until IS NULL;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "file_id",
+        "ordinal": 1,
+        "type_info": "Int64"
+      },
+      {
+        "name": "valid_since",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5c2f9d32045467f7456f2b45b7fe38a88d6d558a911502c8f305cc53e930aab1"
+}
