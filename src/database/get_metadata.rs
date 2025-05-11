@@ -97,7 +97,11 @@ impl FileDatabase {
         .await?;
 
         if files.is_empty() {
-            return Err(Error::VirtualFileNotFound(virtual_path));
+            if virtual_path.is_root() {
+                return Ok(Vec::new());
+            } else {
+                return Err(Error::VirtualFileNotFound(virtual_path));
+            }
         }
 
         Ok(files
@@ -301,6 +305,22 @@ mod tests {
             Error::VirtualFileNotFound(error_path) => assert_eq!(path, error_path),
             _ => assert!(false),
         }
+
+        Ok(())
+    }
+
+    /// Test to verify that trying to get the tree of the empty root returns an empty
+    /// file list.
+    #[tokio::test]
+    async fn test_get_empty_root_metadata() -> Result<()> {
+        let path = VirtualPath::default();
+        let (_test_dir, database) = setup_test_database(vec![]).await?;
+
+        let get_metadata_result = database
+            .get_tree_metadata(path.clone(), get_timestamp(1))
+            .await?;
+
+        assert!(get_metadata_result.is_empty());
 
         Ok(())
     }

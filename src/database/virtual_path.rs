@@ -22,6 +22,11 @@ impl VirtualPath {
         self.pattern.ends_with(VirtualPath::MATCH_PATTERN)
     }
 
+    /// Return whether or not the path points to the root directory.
+    pub fn is_root(&self) -> bool {
+        self.is_dir() && self.pattern.len() == 2
+    }
+
     /// Get the SQL match pattern associated with the virtual path.
     pub fn match_pattern(&self) -> &str {
         &self.pattern
@@ -131,14 +136,17 @@ mod tests {
         let path_file = VirtualPath::from("/path/to/some/file");
         assert!(path_file.is_file());
         assert!(!path_file.is_dir());
+        assert!(!path_file.is_root());
 
         let path_dir = VirtualPath::from("/path/to/some/dir/");
         assert!(!path_dir.is_file());
         assert!(path_dir.is_dir());
+        assert!(!path_dir.is_root());
 
         let path_root = VirtualPath::from("/");
         assert!(!path_root.is_file());
         assert!(path_root.is_dir());
+        assert!(path_root.is_root());
     }
 
     #[test]
