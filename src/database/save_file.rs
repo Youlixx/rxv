@@ -420,42 +420,4 @@ mod tests {
 
         Ok(())
     }
-
-    // TODO: remove
-    // /// Test to verify that attempting to insert a file with an invalid timestamp fails.
-    // ///
-    // /// The expected behavior is that an error is returned when trying to override an
-    // /// existing file with an older timestamp.
-    // #[tokio::test]
-    // async fn test_save_with_invalid_timestamp() -> Result<()> {
-    //     let common_path = VirtualPath::from("/path/to/file.txt");
-
-    //     let insert_with_invalid_timestamp = setup_test_database(vec![
-    //         FileOperation::Save {
-    //             original_file_name: "some_file.txt".to_owned(),
-    //             virtual_path: common_path.clone(),
-    //             content: b"some_file".to_vec().into_boxed_slice(),
-    //             timestamp: get_timestamp(1),
-    //         },
-    //         FileOperation::Save {
-    //             original_file_name: "another_file.txt".to_owned(),
-    //             virtual_path: common_path.clone(),
-    //             content: b"another_file".to_vec().into_boxed_slice(),
-    //             timestamp: get_timestamp(0),
-    //         },
-    //     ])
-    //     .await;
-
-    //     assert!(insert_with_invalid_timestamp.is_err());
-
-    //     match insert_with_invalid_timestamp.err().unwrap() {
-    //         Error::Internal(InternalError::InconsistentTimestamp { existing, inserted }) => {
-    //             assert_eq!(existing, get_timestamp(1));
-    //             assert_eq!(inserted, get_timestamp(0));
-    //         }
-    //         _ => assert!(false),
-    //     };
-
-    //     Ok(())
-    // }
 }

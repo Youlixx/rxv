@@ -1,7 +1,5 @@
 use std::io;
 
-use chrono::{DateTime, Utc};
-
 use super::virtual_path::VirtualPath;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -17,12 +15,6 @@ pub enum InternalError {
 
     #[error("Malformed timestamp within the SQL table: {0}")]
     MalformedTimestamp(#[from] chrono::ParseError),
-
-    #[error("Inconsistent timestamp")]
-    InconsistentTimestamp {
-        existing: DateTime<Utc>,
-        inserted: DateTime<Utc>,
-    },
 }
 
 #[derive(Debug, thiserror::Error)]
