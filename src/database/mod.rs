@@ -14,6 +14,7 @@ pub mod virtual_path;
 pub mod delete_file;
 pub mod get_file;
 pub mod get_metadata;
+pub mod move_file;
 pub mod save_file;
 
 const DATABASE_FILE_NAME: &str = "rxv.db";
@@ -27,6 +28,10 @@ pub trait TimeProvider {
 pub struct ChronoTimeProvider;
 
 impl TimeProvider for ChronoTimeProvider {
+    /// Provide a timestamp.
+    ///
+    /// This function must be monotonic (i.e. function calls must return timestamp
+    /// ordered by call order) to ensure the database consistency.
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
@@ -196,6 +201,10 @@ mod tests {
         Delete {
             virtual_path: VirtualPath,
         },
+        Move {
+            path_old: VirtualPath,
+            path_new: VirtualPath,
+        },
     }
 
     pub type TestDatabase = FileDatabase<TestTimeProvider>;
@@ -281,9 +290,12 @@ mod tests {
                         )
                         .await?;
                 }
-                FileOperation::Delete {
-                    virtual_path,
-                } => database.delete_file(virtual_path).await?,
+                FileOperation::Delete { virtual_path } => {
+                    database.delete_file(virtual_path).await?
+                }
+                FileOperation::Move { path_old, path_new } => {
+                    database.move_file(path_old, path_new).await?
+                }
             }
         }
 
