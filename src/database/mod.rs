@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use chrono::{DateTime, Utc};
 use error::Result;
 use sqlx::SqlitePool;
 use tokio::fs;
@@ -15,16 +16,30 @@ pub mod get_file;
 pub mod get_metadata;
 pub mod save_file;
 
-#[derive(Debug, Clone)]
-pub struct FileDatabase {
-    database: SqlitePool,
-    path_files: PathBuf,
+const DATABASE_FILE_NAME: &str = "rxv.db";
+const STORAGE_FOLDER_NAME: &str = "files";
+
+pub trait TimeProvider {
+    fn now(&mut self) -> DateTime<Utc>;
 }
 
-impl FileDatabase {
-    const DATABASE_FILE_NAME: &str = "rxv.db";
-    const STORAGE_FOLDER_NAME: &str = "files";
+#[derive(Debug, Clone, Default)]
+pub struct ChronoTimeProvider;
 
+impl TimeProvider for ChronoTimeProvider {
+    fn now(&mut self) -> DateTime<Utc> {
+        Utc::now()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FileDatabase<T: TimeProvider = ChronoTimeProvider> {
+    database: SqlitePool,
+    path_files: PathBuf,
+    time_provider: T,
+}
+
+impl<T> FileDatabase<T> where T: TimeProvider {
     /// Set up the database tables.
     ///
     /// This function creates the necessary tables for storing file information and
@@ -70,6 +85,15 @@ impl FileDatabase {
         Ok(())
     }
 
+    fn get_physical_file_path(&self, hash: &str) -> PathBuf {
+        self.path_files.join(hash)
+    }
+}
+
+impl<T> FileDatabase<T>
+where
+    T: TimeProvider + Default,
+{
     /// Open the database at the given path.
     ///
     /// The given path must be absolute. If the database does not exist yet, it will be
@@ -88,12 +112,12 @@ impl FileDatabase {
             fs::create_dir_all(path_root).await?;
         }
 
-        let path_database = path_root.join(FileDatabase::DATABASE_FILE_NAME);
+        let path_database = path_root.join(DATABASE_FILE_NAME);
         if !path_database.exists() {
             fs::File::create(&path_database).await?;
         }
 
-        let path_files = path_root.join(FileDatabase::STORAGE_FOLDER_NAME);
+        let path_files = path_root.join(STORAGE_FOLDER_NAME);
         if !path_files.exists() {
             fs::create_dir(&path_files).await?;
         }
@@ -103,15 +127,12 @@ impl FileDatabase {
         let database = FileDatabase {
             database: SqlitePool::connect(&database_url).await?,
             path_files: path_files.to_path_buf(),
+            time_provider: T::default(),
         };
 
         database.setup_tables().await?;
 
         Ok(database)
-    }
-
-    fn get_physical_file_path(&self, hash: &str) -> PathBuf {
-        self.path_files.join(hash)
     }
 }
 
@@ -246,9 +267,7 @@ mod tests {
                 FileOperation::Delete {
                     virtual_path,
                     timestamp,
-                } => {
-                    database.delete_file(virtual_path, timestamp).await?;
-                }
+                } => database.delete_file(virtual_path, timestamp).await?,
             }
         }
 
