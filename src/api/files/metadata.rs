@@ -12,7 +12,7 @@ use crate::{
 use super::RequestTimestamp;
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct SerializableMetadata {
+pub struct FileMetadata {
     original_file_name: String,
     size_in_bytes: usize,
     hash: String,
@@ -21,7 +21,7 @@ pub struct SerializableMetadata {
 
 #[derive(Debug, ToSchema)]
 enum FileNode {
-    File(SerializableMetadata),
+    File(FileMetadata),
     Dir(HashMap<String, FileNode>),
 }
 
@@ -49,8 +49,8 @@ impl FileTree {
         }
     }
 
-    fn insert_file(&mut self, entry: PathMetadataPair, prefix: &str) {
-        let components = entry.virtual_path.path()[prefix.len()..]
+    fn insert_file(&mut self, metadata: PathMetadataPair, prefix: &str) {
+        let components = metadata.virtual_path.path()[prefix.len()..]
             .split(VirtualPath::SEPARATOR)
             .collect::<Vec<_>>();
 
@@ -58,24 +58,25 @@ impl FileTree {
 
         for (index, component) in components.iter().enumerate() {
             current = match current.entry((*component).to_owned()) {
-                Entry::Vacant(e) => {
+                Entry::Vacant(entry) => {
                     if index == components.len() - 1 {
-                        e.insert(FileNode::File(SerializableMetadata {
-                            original_file_name: entry.metadata.original_file_name,
-                            size_in_bytes: entry.metadata.size_in_bytes,
-                            hash: entry.metadata.hash,
-                            upload_timestamp: entry.upload_timestamp.to_rfc3339(),
+                        entry.insert(FileNode::File(FileMetadata {
+                            original_file_name: metadata.metadata.original_file_name,
+                            size_in_bytes: metadata.metadata.size_in_bytes,
+                            hash: metadata.metadata.hash,
+                            upload_timestamp: metadata.upload_timestamp.to_rfc3339(),
                         }));
+
                         return;
-                    } else {
-                        match e.insert(FileNode::Dir(HashMap::new())) {
-                            FileNode::Dir(m) => m,
-                            FileNode::File(_) => unreachable!(),
-                        }
+                    }
+
+                    match entry.insert(FileNode::Dir(HashMap::new())) {
+                        FileNode::Dir(node_dir) => node_dir,
+                        FileNode::File(_) => unreachable!(),
                     }
                 }
-                Entry::Occupied(e) => match e.into_mut() {
-                    FileNode::Dir(m) => m,
+                Entry::Occupied(entry) => match entry.into_mut() {
+                    FileNode::Dir(node_dir) => node_dir,
                     FileNode::File(_) => unreachable!(),
                 },
             }
@@ -102,7 +103,7 @@ impl Serialize for FileTree {
         (status = 200, description = "The filepaths were successfully returned")
     )
 )]
-pub async fn endpoint_tree(
+pub async fn endpoint_get_file_tree(
     State(database): State<FileDatabase>,
     path: Option<ExtractPath<String>>,
     Query(timestamp): Query<RequestTimestamp>,
@@ -133,17 +134,17 @@ pub async fn endpoint_tree(
         (status = 200, description = "The metadata were successfully returned")
     )
 )]
-pub async fn endpoint_metadata(
+pub async fn endpoint_get_single_file_metadata(
     State(database): State<FileDatabase>,
     path: ExtractPath<String>,
     Query(timestamp): Query<RequestTimestamp>,
-) -> ApiResult<SerializableMetadata> {
+) -> ApiResult<FileMetadata> {
     let virtual_path = VirtualPath::from(path.0);
     let metadata = database
         .get_file_metadata(virtual_path, timestamp.try_into()?)
         .await?;
 
-    Ok(ApiResponse::success(SerializableMetadata {
+    Ok(ApiResponse::success(FileMetadata {
         original_file_name: metadata.metadata.original_file_name,
         size_in_bytes: metadata.metadata.size_in_bytes,
         hash: metadata.metadata.hash,
