@@ -1,4 +1,8 @@
-use super::{error::{Error, Result}, virtual_path::VirtualPath, FileDatabase, TimeProvider};
+use super::{
+    FileDatabase, TimeProvider,
+    error::{Error, Result},
+    virtual_path::VirtualPath,
+};
 
 impl<T: TimeProvider> FileDatabase<T> {
     /// Delete a file from the current storage.
