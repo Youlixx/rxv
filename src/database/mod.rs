@@ -20,14 +20,14 @@ const DATABASE_FILE_NAME: &str = "rxv.db";
 const STORAGE_FOLDER_NAME: &str = "files";
 
 pub trait TimeProvider {
-    fn now(&mut self) -> DateTime<Utc>;
+    fn now(&self) -> DateTime<Utc>;
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ChronoTimeProvider;
 
 impl TimeProvider for ChronoTimeProvider {
-    fn now(&mut self) -> DateTime<Utc> {
+    fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
 }
@@ -39,7 +39,10 @@ pub struct FileDatabase<T: TimeProvider = ChronoTimeProvider> {
     time_provider: T,
 }
 
-impl<T> FileDatabase<T> where T: TimeProvider {
+impl<T> FileDatabase<T>
+where
+    T: TimeProvider,
+{
     /// Set up the database tables.
     ///
     /// This function creates the necessary tables for storing file information and
@@ -138,13 +141,29 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{FileDatabase, error::Result, save_file::FileMetadata, virtual_path::VirtualPath};
+    use super::{
+        FileDatabase, TimeProvider, error::Result, save_file::FileMetadata,
+        virtual_path::VirtualPath,
+    };
     use async_tempfile::{TempDir, TempFile};
     use chrono::{DateTime, Utc};
     use md5::Digest;
     use sha2::Sha256;
-    use std::{fs::File, io::Read};
+    use std::{cell::RefCell, fs::File, io::Read};
     use tokio::io::AsyncWriteExt;
+
+    #[derive(Debug, Clone, Default)]
+    pub struct TestTimeProvider {
+        last_timestamp: RefCell<usize>,
+    }
+
+    impl TimeProvider for TestTimeProvider {
+        fn now(&self) -> DateTime<Utc> {
+            let timestamp = get_timestamp(*self.last_timestamp.borrow());
+            *self.last_timestamp.borrow_mut() += 1;
+            timestamp
+        }
+    }
 
     #[derive(Debug, Eq, PartialEq)]
     pub struct FileDatabaseFile {
@@ -173,13 +192,13 @@ mod tests {
             original_file_name: String,
             virtual_path: VirtualPath,
             content: Box<[u8]>,
-            timestamp: DateTime<Utc>,
         },
         Delete {
             virtual_path: VirtualPath,
-            timestamp: DateTime<Utc>,
         },
     }
+
+    pub type TestDatabase = FileDatabase<TestTimeProvider>;
 
     pub fn get_timestamp(seconds: usize) -> DateTime<Utc> {
         return DateTime::from_timestamp(seconds as i64, 0)
@@ -193,7 +212,7 @@ mod tests {
         hex::encode(hash.finalize())
     }
 
-    pub async fn get_database_state(database: &FileDatabase) -> Result<FileDatabaseState> {
+    pub async fn get_database_state(database: &TestDatabase) -> Result<FileDatabaseState> {
         let files = sqlx::query!("SELECT * FROM files;")
             .fetch_all(&database.database)
             .await?
@@ -236,9 +255,9 @@ mod tests {
 
     pub async fn setup_test_database(
         operations: Vec<FileOperation>,
-    ) -> Result<(TempDir, FileDatabase)> {
+    ) -> Result<(TempDir, TestDatabase)> {
         let test_dir = TempDir::new().await.unwrap();
-        let database = FileDatabase::open(test_dir.dir_path()).await?;
+        let database = TestDatabase::open(test_dir.dir_path()).await?;
 
         for operation in operations {
             match operation {
@@ -246,7 +265,6 @@ mod tests {
                     original_file_name,
                     virtual_path,
                     content,
-                    timestamp,
                 } => {
                     let mut file = TempFile::new().await.unwrap();
                     file.write(&content).await?;
@@ -255,7 +273,6 @@ mod tests {
                         .save_file(
                             file.file_path(),
                             virtual_path,
-                            timestamp,
                             FileMetadata {
                                 original_file_name: original_file_name,
                                 size_in_bytes: content.len(),
@@ -266,8 +283,7 @@ mod tests {
                 }
                 FileOperation::Delete {
                     virtual_path,
-                    timestamp,
-                } => database.delete_file(virtual_path, timestamp).await?,
+                } => database.delete_file(virtual_path).await?,
             }
         }
 

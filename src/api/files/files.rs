@@ -4,7 +4,6 @@ use axum::{
     extract::{Multipart, Path as ExtractPath, Query, State},
     http::{Response, StatusCode, header},
 };
-use chrono::Utc;
 use md5::Digest;
 use sha2::Sha256;
 use tokio::{fs::File, io::AsyncWriteExt};
@@ -178,7 +177,6 @@ pub async fn endpoint_upload_file(
         .save_file(
             temp_file.file_path(),
             path,
-            Utc::now(),
             builder
                 .build()
                 .ok_or(ApiError::MultipartMissingField("file".to_owned()))?,
@@ -209,7 +207,7 @@ pub async fn endpoint_delete_file(
     };
 
     database
-        .delete_file(virtual_path, Utc::now())
+        .delete_file(virtual_path)
         .await
         .map(|_| ApiResponse::success(()))
         .map_err(|err| err.into())

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use super::{
-    FileDatabase,
+    FileDatabase, TimeProvider,
     error::{Error, Result},
     save_file::FileMetadata,
     virtual_path::VirtualPath,
@@ -14,7 +14,7 @@ pub struct PathMetadataPair {
     pub upload_timestamp: DateTime<Utc>,
 }
 
-impl FileDatabase {
+impl<T: TimeProvider> FileDatabase<T> {
     /// Retrieve the metadata of a single file.
     pub async fn get_file_metadata(
         &self,
@@ -142,7 +142,6 @@ mod tests {
             original_file_name: original_file_name.to_owned(),
             virtual_path: path.clone(),
             content: content.clone(),
-            timestamp: get_timestamp(0),
         }])
         .await?;
 
@@ -211,12 +210,18 @@ mod tests {
         let original_file_name = "some_file.txt";
         let content = b"hello world!".to_vec().into_boxed_slice();
 
-        let (_test_dir, database) = setup_test_database(vec![FileOperation::Save {
-            original_file_name: original_file_name.to_owned(),
-            virtual_path: path.clone(),
-            content: content.clone(),
-            timestamp: get_timestamp(1),
-        }])
+        let (_test_dir, database) = setup_test_database(vec![
+            FileOperation::Save {
+                original_file_name: "dummy.txt".to_owned(),
+                virtual_path: VirtualPath::from("dummy.txt"),
+                content: b"dummy".to_vec().into_boxed_slice(),
+            },
+            FileOperation::Save {
+                original_file_name: original_file_name.to_owned(),
+                virtual_path: path.clone(),
+                content: content.clone(),
+            },
+        ])
         .await?;
 
         let get_metadata_result = database
@@ -253,7 +258,6 @@ mod tests {
                     original_file_name: filename.to_string(),
                     virtual_path: VirtualPath::from(virtual_path),
                     content: content.to_vec().into_boxed_slice(),
-                    timestamp: get_timestamp(0),
                 })
                 .collect(),
         )
@@ -261,27 +265,30 @@ mod tests {
 
         let expected_file_metadata = files
             .into_iter()
-            .map(|(filename, virtual_path, content)| PathMetadataPair {
-                virtual_path: VirtualPath::from(virtual_path),
-                metadata: FileMetadata {
-                    original_file_name: filename.to_string(),
-                    size_in_bytes: content.len(),
-                    hash: get_hash(content),
+            .enumerate()
+            .map(
+                |(index, (filename, virtual_path, content))| PathMetadataPair {
+                    virtual_path: VirtualPath::from(virtual_path),
+                    metadata: FileMetadata {
+                        original_file_name: filename.to_string(),
+                        size_in_bytes: content.len(),
+                        hash: get_hash(content),
+                    },
+                    upload_timestamp: get_timestamp(index),
                 },
-                upload_timestamp: get_timestamp(0),
-            })
+            )
             .collect::<Vec<_>>();
 
         assert_eq!(
             database
-                .get_tree_metadata(VirtualPath::from("/my_files/"), get_timestamp(1))
+                .get_tree_metadata(VirtualPath::from("/my_files/"), get_timestamp(5))
                 .await?,
             expected_file_metadata[..2]
         );
 
         assert_eq!(
             database
-                .get_tree_metadata(VirtualPath::default(), get_timestamp(1))
+                .get_tree_metadata(VirtualPath::default(), get_timestamp(5))
                 .await?,
             expected_file_metadata
         );

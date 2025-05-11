@@ -1,11 +1,10 @@
 use std::path::Path;
 
-use chrono::{DateTime, Utc};
 use tokio::fs;
 
 use super::{
-    FileDatabase,
-    error::{Error, InternalError, Result},
+    FileDatabase, TimeProvider,
+    error::{Error, Result},
     virtual_path::VirtualPath,
 };
 
@@ -16,7 +15,7 @@ pub struct FileMetadata {
     pub hash: String,
 }
 
-impl FileDatabase {
+impl<T: TimeProvider> FileDatabase<T> {
     /// Push a file to the database and storage.
     ///
     /// This function takes a path to a physical file, a virtual storage path, a
@@ -24,16 +23,10 @@ impl FileDatabase {
     /// database, it copies the file to the storage path and updates the database with
     /// the file's metadata. The virtual storage path are then updated to point to the
     /// new file.
-    ///
-    /// # Errors
-    ///
-    /// If there is a live file at the given virtual path, the given timestamp must be
-    /// strictly greater than the one of the previously live file.
     pub async fn save_file(
         &self,
         path_physical_file: impl AsRef<Path>,
         virtual_path: impl Into<VirtualPath>,
-        timestamp: DateTime<Utc>,
         metadata: FileMetadata,
     ) -> Result<()> {
         let virtual_path: VirtualPath = virtual_path.into();
@@ -44,7 +37,7 @@ impl FileDatabase {
 
         let path_copy = self.path_files.join(&metadata.hash);
         let path_storage = virtual_path.path();
-        let timestamp_str = timestamp.to_rfc3339();
+        let timestamp_str = self.time_provider.now().to_rfc3339();
         let mut transaction = self.database.begin().await?;
 
         let current_file_id = sqlx::query!(
@@ -100,42 +93,17 @@ impl FileDatabase {
             return Ok(());
         }
 
-        let last_file_timestamp = sqlx::query!(
+        sqlx::query!(
             r#"
-            SELECT valid_since as "valid_since!" FROM paths
+            UPDATE paths
+            SET valid_until = ?
             WHERE path = ? AND valid_until IS NULL;
             "#,
+            timestamp_str,
             path_storage
         )
-        .fetch_optional(&mut *transaction)
+        .execute(&mut *transaction)
         .await?;
-
-        if let Some(last_file_timestamp) = &last_file_timestamp {
-            let last_timestamp =
-                DateTime::parse_from_rfc3339(&last_file_timestamp.valid_since)?.to_utc();
-
-            if last_timestamp > timestamp {
-                transaction.rollback().await?;
-
-                return Err(InternalError::InconsistentTimestamp {
-                    existing: last_timestamp,
-                    inserted: timestamp,
-                }
-                .into());
-            }
-
-            sqlx::query!(
-                r#"
-                UPDATE paths
-                SET valid_until = ?
-                WHERE path = ? AND valid_until IS NULL;
-                "#,
-                timestamp_str,
-                path_storage
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
 
         sqlx::query!(
             r#"
@@ -158,7 +126,7 @@ impl FileDatabase {
 #[cfg(test)]
 mod tests {
     use crate::database::{
-        error::{Error, InternalError, Result},
+        error::{Error, Result},
         tests::{
             FileDatabaseFile, FileDatabasePath, FileDatabaseState, FileOperation,
             check_database_state, get_timestamp, setup_test_database,
@@ -176,25 +144,23 @@ mod tests {
         let original_name_file = "some_file.txt";
         let path = VirtualPath::from("my_files/helloworld.txt");
         let content = b"hello world!".to_vec().into_boxed_slice();
-        let timestamp = get_timestamp(0);
 
         check_database_state(
             vec![FileOperation::Save {
                 original_file_name: original_name_file.to_owned(),
                 virtual_path: path.clone(),
                 content: content.clone(),
-                timestamp: timestamp.clone(),
             }],
             FileDatabaseState {
                 files: vec![FileDatabaseFile {
                     original_file_name: original_name_file.to_owned(),
-                    upload_date: timestamp.clone(),
+                    upload_date: get_timestamp(0),
                     content: content,
                 }],
                 paths: vec![FileDatabasePath {
                     file_id: 1,
                     path: path,
-                    valid_since: timestamp,
+                    valid_since: get_timestamp(0),
                     valid_until: None,
                 }],
             },
@@ -216,19 +182,16 @@ mod tests {
                     original_file_name: "file1.txt".to_owned(),
                     virtual_path: "my_files/helloworld.txt".into(),
                     content: b"hello world!".to_vec().into_boxed_slice(),
-                    timestamp: get_timestamp(0),
                 },
                 FileOperation::Save {
                     original_file_name: "file2.txt".to_owned(),
                     virtual_path: "my_files/some_file.txt".into(),
                     content: b"I'm a sample file!".to_vec().into_boxed_slice(),
-                    timestamp: get_timestamp(1),
                 },
                 FileOperation::Save {
                     original_file_name: "file3.txt".to_owned(),
                     virtual_path: "definitely_not_a_file.txt".into(),
                     content: b"I'm not a file :)".to_vec().into_boxed_slice(),
-                    timestamp: get_timestamp(2),
                 },
             ],
             FileDatabaseState {
@@ -291,13 +254,11 @@ mod tests {
                     original_file_name: "some_file.txt".to_owned(),
                     virtual_path: "my_files/helloworld.txt".into(),
                     content: file_content.clone(),
-                    timestamp: get_timestamp(0),
                 },
                 FileOperation::Save {
                     original_file_name: "some_other_file.txt".to_owned(),
                     virtual_path: "my_files/different/file.txt".into(),
                     content: file_content.clone(),
-                    timestamp: get_timestamp(1),
                 },
             ],
             FileDatabaseState {
@@ -341,13 +302,11 @@ mod tests {
                     original_file_name: "some_file.txt".to_owned(),
                     virtual_path: common_path.clone(),
                     content: file_base_content.clone(),
-                    timestamp: get_timestamp(0),
                 },
                 FileOperation::Save {
                     original_file_name: "other_file.txt".to_owned(),
                     virtual_path: common_path.clone(),
                     content: file_over_content.clone(),
-                    timestamp: get_timestamp(1),
                 },
             ],
             FileDatabaseState {
@@ -399,13 +358,11 @@ mod tests {
                     original_file_name: "some_file.txt".to_owned(),
                     virtual_path: common_path.clone(),
                     content: file_content.clone(),
-                    timestamp: get_timestamp(0),
                 },
                 FileOperation::Save {
                     original_file_name: "some_other_file.txt".to_owned(),
                     virtual_path: common_path.clone(),
                     content: file_content.clone(),
-                    timestamp: get_timestamp(1),
                 },
             ],
             FileDatabaseState {
@@ -435,7 +392,6 @@ mod tests {
             original_file_name: "some_file.txt".to_owned(),
             virtual_path: VirtualPath::from("/"),
             content: Box::default(),
-            timestamp: get_timestamp(0),
         }])
         .await;
 
@@ -451,7 +407,6 @@ mod tests {
             original_file_name: "some_file.txt".to_owned(),
             virtual_path: VirtualPath::from("/path/to/some/dir/"),
             content: Box::default(),
-            timestamp: get_timestamp(0),
         }])
         .await;
 
@@ -466,40 +421,41 @@ mod tests {
         Ok(())
     }
 
-    /// Test to verify that attempting to insert a file with an invalid timestamp fails.
-    ///
-    /// The expected behavior is that an error is returned when trying to override an
-    /// existing file with an older timestamp.
-    #[tokio::test]
-    async fn test_save_with_invalid_timestamp() -> Result<()> {
-        let common_path = VirtualPath::from("/path/to/file.txt");
+    // TODO: remove
+    // /// Test to verify that attempting to insert a file with an invalid timestamp fails.
+    // ///
+    // /// The expected behavior is that an error is returned when trying to override an
+    // /// existing file with an older timestamp.
+    // #[tokio::test]
+    // async fn test_save_with_invalid_timestamp() -> Result<()> {
+    //     let common_path = VirtualPath::from("/path/to/file.txt");
 
-        let insert_with_invalid_timestamp = setup_test_database(vec![
-            FileOperation::Save {
-                original_file_name: "some_file.txt".to_owned(),
-                virtual_path: common_path.clone(),
-                content: b"some_file".to_vec().into_boxed_slice(),
-                timestamp: get_timestamp(1),
-            },
-            FileOperation::Save {
-                original_file_name: "another_file.txt".to_owned(),
-                virtual_path: common_path.clone(),
-                content: b"another_file".to_vec().into_boxed_slice(),
-                timestamp: get_timestamp(0),
-            },
-        ])
-        .await;
+    //     let insert_with_invalid_timestamp = setup_test_database(vec![
+    //         FileOperation::Save {
+    //             original_file_name: "some_file.txt".to_owned(),
+    //             virtual_path: common_path.clone(),
+    //             content: b"some_file".to_vec().into_boxed_slice(),
+    //             timestamp: get_timestamp(1),
+    //         },
+    //         FileOperation::Save {
+    //             original_file_name: "another_file.txt".to_owned(),
+    //             virtual_path: common_path.clone(),
+    //             content: b"another_file".to_vec().into_boxed_slice(),
+    //             timestamp: get_timestamp(0),
+    //         },
+    //     ])
+    //     .await;
 
-        assert!(insert_with_invalid_timestamp.is_err());
+    //     assert!(insert_with_invalid_timestamp.is_err());
 
-        match insert_with_invalid_timestamp.err().unwrap() {
-            Error::Internal(InternalError::InconsistentTimestamp { existing, inserted }) => {
-                assert_eq!(existing, get_timestamp(1));
-                assert_eq!(inserted, get_timestamp(0));
-            }
-            _ => assert!(false),
-        };
+    //     match insert_with_invalid_timestamp.err().unwrap() {
+    //         Error::Internal(InternalError::InconsistentTimestamp { existing, inserted }) => {
+    //             assert_eq!(existing, get_timestamp(1));
+    //             assert_eq!(inserted, get_timestamp(0));
+    //         }
+    //         _ => assert!(false),
+    //     };
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }

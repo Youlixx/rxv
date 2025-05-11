@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 
-use super::{FileDatabase, error::Result, virtual_path::VirtualPath};
+use super::{FileDatabase, TimeProvider, error::Result, virtual_path::VirtualPath};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct FileEntry {
@@ -17,7 +17,7 @@ pub enum FileEntries {
     MultipleFiles(Vec<FileEntry>),
 }
 
-impl FileDatabase {
+impl<T: TimeProvider> FileDatabase<T> {
     async fn get_single_file_path(
         &self,
         virtual_path: VirtualPath,
@@ -144,7 +144,6 @@ mod tests {
             original_file_name: "some_file.txt".to_owned(),
             virtual_path: path.clone(),
             content: content.clone(),
-            timestamp: get_timestamp(0),
         }])
         .await?;
 
@@ -182,19 +181,16 @@ mod tests {
                 original_file_name: "file1.txt".to_owned(),
                 virtual_path: files[0].0.clone(),
                 content: files[0].1.clone(),
-                timestamp: get_timestamp(0),
             },
             FileOperation::Save {
                 original_file_name: "file2.txt".to_owned(),
                 virtual_path: files[1].0.clone(),
                 content: files[1].1.clone(),
-                timestamp: get_timestamp(1),
             },
             FileOperation::Save {
                 original_file_name: "file3.txt".to_owned(),
                 virtual_path: "definitely_not_a_file.txt".into(),
                 content: b"I'm not a file :)".to_vec().into_boxed_slice(),
-                timestamp: get_timestamp(2),
             },
         ])
         .await?;
@@ -234,7 +230,6 @@ mod tests {
             original_file_name: "some_file.txt".to_owned(),
             virtual_path: path.clone(),
             content: content.clone(),
-            timestamp: get_timestamp(0),
         }])
         .await?;
 
@@ -281,7 +276,6 @@ mod tests {
                     original_file_name: index.to_string() + ".txt",
                     virtual_path: file.0.clone(),
                     content: file.1.clone(),
-                    timestamp: get_timestamp(index),
                 })
                 .collect::<Vec<_>>(),
         )
@@ -311,12 +305,18 @@ mod tests {
     /// the function should return [`FileEntries::None`] in both cases.
     #[tokio::test]
     async fn test_get_invalid_file() -> Result<()> {
-        let (_test_dir, database) = setup_test_database(vec![FileOperation::Save {
-            original_file_name: "some_file.txt".to_owned(),
-            virtual_path: VirtualPath::from("/my_files/helloworld.txt"),
-            content: b"hello world!".to_vec().into_boxed_slice(),
-            timestamp: get_timestamp(1),
-        }])
+        let (_test_dir, database) = setup_test_database(vec![
+            FileOperation::Save {
+                original_file_name: "some_file.txt".to_owned(),
+                virtual_path: VirtualPath::from("/my_files/helloworld.txt"),
+                content: b"hello world!".to_vec().into_boxed_slice(),
+            },
+            FileOperation::Save {
+                original_file_name: "another_file.txt".to_owned(),
+                virtual_path: VirtualPath::from("/my_new_file.txt"),
+                content: b"hello world!".to_vec().into_boxed_slice(),
+            },
+        ])
         .await?;
 
         assert_eq!(
@@ -336,7 +336,7 @@ mod tests {
         assert_eq!(
             database
                 .get_file(
-                    VirtualPath::from("/my_files/helloworld.txt"),
+                    VirtualPath::from("/my_new_file.txt"),
                     get_timestamp(0)
                 )
                 .await?,
