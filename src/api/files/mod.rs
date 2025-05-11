@@ -18,6 +18,7 @@ pub fn router(database: FileDatabase) -> OpenApiRouter {
         .routes(routes!(files::endpoint_upload_file))
         .route("/files/", delete(files::endpoint_delete_file))
         .routes(routes!(files::endpoint_delete_file))
+        .routes(routes!(files::endpoint_move_file))
         .route("/tree/", get(metadata::endpoint_get_file_tree))
         .routes(routes!(metadata::endpoint_get_file_tree))
         .routes(routes!(metadata::endpoint_get_single_file_metadata))

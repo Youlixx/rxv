@@ -1,10 +1,12 @@
 use async_tempfile::TempFile;
 use axum::{
+    Json,
     body::Body,
     extract::{Multipart, Path as ExtractPath, Query, State},
     http::{Response, StatusCode, header},
 };
 use md5::Digest;
+use serde::Deserialize;
 use sha2::Sha256;
 use tokio::{fs::File, io::AsyncWriteExt};
 use tokio_tar::Builder;
@@ -208,6 +210,31 @@ pub async fn endpoint_delete_file(
 
     database
         .delete_file(virtual_path)
+        .await
+        .map(|_| ApiResponse::success(()))
+        .map_err(|err| err.into())
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MoveFileRequest {
+    path_old: String,
+    path_new: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/move/",
+    tag = "files",
+    responses(
+        (status = 200, description = "The file got moved")
+    )
+)]
+pub async fn endpoint_move_file(
+    State(database): State<FileDatabase>,
+    Json(payload): Json<MoveFileRequest>,
+) -> ApiResult<()> {
+    database
+        .move_file(payload.path_old, payload.path_new)
         .await
         .map(|_| ApiResponse::success(()))
         .map_err(|err| err.into())
