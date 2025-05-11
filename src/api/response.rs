@@ -47,7 +47,9 @@ impl From<io::Error> for ApiError {
 enum ApiErrorCode {
     Internal = 0,
     NotAFile,
+    NotADirectory,
     FileNotFound,
+    InconsistentPaths,
     InvalidTimestamp,
     MalformedMultipartForm,
     Unknown = u8::MAX,
@@ -121,10 +123,27 @@ impl<T> From<ApiError> for ApiResponse<T> {
                     path.path()
                 ),
             ),
+            ApiError::Database(Error::NotAVirtualDirectory(path)) => (
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::NotADirectory,
+                format!(
+                    "The given path should point to a directory ({} points to a file)",
+                    path.path()
+                ),
+            ),
             ApiError::Database(Error::VirtualFileNotFound(path)) => (
                 StatusCode::NOT_FOUND,
                 ApiErrorCode::FileNotFound,
                 format!("File not found: {}", path.path()),
+            ),
+            ApiError::Database(Error::InconsistentVirtualPaths { path_old, path_new }) => (
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::InconsistentPaths,
+                format!(
+                    "The given paths should point both a file or a directory (got {} and {})",
+                    path_old.path(),
+                    path_new.path()
+                ),
             ),
             ApiError::InvalidTimestamp(error) => (
                 StatusCode::UNPROCESSABLE_ENTITY,

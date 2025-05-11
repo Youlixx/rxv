@@ -1,50 +1,74 @@
 use async_tempfile::TempFile;
 use axum::{
+    Json,
     body::Body,
     extract::{Multipart, Path as ExtractPath, Query, State},
     http::{Response, StatusCode, header},
-    routing::get,
 };
-use chrono::{DateTime, TimeDelta, Utc};
+use md5::Digest;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use tokio::{fs::File, io::AsyncWriteExt};
 use tokio_tar::Builder;
 use tokio_util::io::ReaderStream;
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::database::{
-    FileDatabase, error::Error, get_file::FileEntries, save_file::FileMetadata,
-    virtual_path::VirtualPath,
+use crate::{
+    api::response::{ApiError, ApiResponse, ApiResult, Result},
+    database::{
+        FileDatabase, error::Error, get_file::FileEntries, save_file::FileMetadata,
+        virtual_path::VirtualPath,
+    },
 };
 
-use super::response::{ApiError, ApiResponse, ApiResult, Result};
+use super::RequestTimestamp;
 
 const ROOT_ARCHIVE_NAME: &str = "archive";
 
-pub fn router(database: FileDatabase) -> OpenApiRouter {
-    OpenApiRouter::new()
-        .route("/files/", get(get_file))
-        .routes(routes!(get_file, save_file, delete_file))
-        .with_state(database)
+#[derive(ToSchema)]
+struct UploadFileRequest {
+    #[allow(unused)]
+    #[schema(format = Binary, content_media_type = "application/octet-stream")]
+    file: String,
 }
 
-#[derive(Deserialize, ToSchema)]
-struct RequestTimestamp {
-    timestamp: Option<String>,
-    seconds: Option<i64>,
+#[derive(Debug)]
+struct FileMetadataBuilder {
+    original_file_name: Option<String>,
+    size_in_bytes: Option<usize>,
+    hash: Option<String>,
 }
 
-impl TryFrom<RequestTimestamp> for DateTime<Utc> {
-    type Error = ApiError;
+impl FileMetadataBuilder {
+    fn new() -> Self {
+        Self {
+            original_file_name: None,
+            size_in_bytes: None,
+            hash: None,
+        }
+    }
 
-    fn try_from(value: RequestTimestamp) -> std::result::Result<Self, Self::Error> {
-        Ok(match (value.timestamp, value.seconds) {
-            (Some(timestamp), _) => DateTime::parse_from_rfc3339(&timestamp)?.with_timezone(&Utc),
-            (None, Some(seconds)) => Utc::now() - TimeDelta::seconds(seconds),
-            _ => Utc::now(),
-        })
+    fn set_original_name(&mut self, original_name: &str) {
+        self.original_file_name = Some(original_name.into());
+    }
+
+    fn set_size_in_bytes(&mut self, size_in_bytes: usize) {
+        self.size_in_bytes = Some(size_in_bytes);
+    }
+
+    fn set_hash(&mut self, hash: String) {
+        self.hash = Some(hash);
+    }
+
+    fn build(self) -> Option<FileMetadata> {
+        match (self.original_file_name, self.size_in_bytes, self.hash) {
+            (Some(original_file_name), Some(size_in_bytes), Some(hash)) => Some(FileMetadata {
+                original_file_name,
+                size_in_bytes,
+                hash,
+            }),
+            _ => None,
+        }
     }
 }
 
@@ -56,7 +80,7 @@ impl TryFrom<RequestTimestamp> for DateTime<Utc> {
         (status = 200, description = "The filepaths were successfully returned")
     )
 )]
-async fn get_file(
+pub async fn endpoint_download_file(
     State(storage): State<FileDatabase>,
     path: Option<ExtractPath<String>>,
     Query(timestamp): Query<RequestTimestamp>,
@@ -108,49 +132,6 @@ async fn get_file(
     Ok(response)
 }
 
-#[derive(ToSchema)]
-#[allow(unused)]
-struct UploadFileRequest {
-    #[schema(format = Binary, content_media_type = "application/octet-stream")]
-    file: String,
-}
-
-#[derive(Default)]
-struct FileMetadataBuilder {
-    original_file_name: Option<String>,
-    size_in_bytes: Option<usize>,
-    hash: Option<String>,
-}
-
-impl FileMetadataBuilder {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn original_name(&mut self, original_name: &str) {
-        self.original_file_name = Some(original_name.into());
-    }
-
-    fn size_in_bytes(&mut self, size_in_bytes: usize) {
-        self.size_in_bytes = Some(size_in_bytes);
-    }
-
-    fn hash(&mut self, hash: String) {
-        self.hash = Some(hash);
-    }
-
-    fn build(self) -> Option<FileMetadata> {
-        match (self.original_file_name, self.size_in_bytes, self.hash) {
-            (Some(original_file_name), Some(size_in_bytes), Some(hash)) => Some(FileMetadata {
-                original_file_name,
-                size_in_bytes,
-                hash,
-            }),
-            _ => None,
-        }
-    }
-}
-
 #[utoipa::path(
     post,
     request_body(
@@ -163,13 +144,13 @@ impl FileMetadataBuilder {
         (status = 201, description = "The file was successfully uploaded")
     )
 )]
-async fn save_file(
+pub async fn endpoint_upload_file(
     State(database): State<FileDatabase>,
     ExtractPath(path): ExtractPath<String>,
     mut multipart: Multipart,
 ) -> ApiResult<()> {
     let mut temp_file = TempFile::new().await?;
-    let mut file_info_builder = FileMetadataBuilder::new();
+    let mut builder = FileMetadataBuilder::new();
     let mut hasher_sha256 = Sha256::new();
 
     while let Some(mut field) = multipart.next_field().await? {
@@ -183,23 +164,22 @@ async fn save_file(
                 hasher_sha256.update(&chunk);
             }
 
-            file_info_builder.size_in_bytes(size_in_bytes);
+            builder.set_size_in_bytes(size_in_bytes);
 
             if let Some(original_name) = field.file_name() {
-                file_info_builder.original_name(original_name);
+                builder.set_original_name(original_name);
             }
         }
     }
 
     let hash = hex::encode(hasher_sha256.finalize());
-    file_info_builder.hash(hash);
+    builder.set_hash(hash);
 
     database
         .save_file(
             temp_file.file_path(),
             path,
-            Utc::now(),
-            file_info_builder
+            builder
                 .build()
                 .ok_or(ApiError::MultipartMissingField("file".to_owned()))?,
         )
@@ -219,12 +199,42 @@ async fn save_file(
         (status = 200, description = "The file or folder got deleted")
     )
 )]
-async fn delete_file(
+pub async fn endpoint_delete_file(
     State(database): State<FileDatabase>,
-    ExtractPath(path): ExtractPath<String>,
+    path: Option<ExtractPath<String>>,
+) -> ApiResult<()> {
+    let virtual_path = match path {
+        Some(path) => VirtualPath::from(path.0),
+        None => VirtualPath::default(),
+    };
+
+    database
+        .delete_file(virtual_path)
+        .await
+        .map(|_| ApiResponse::success(()))
+        .map_err(|err| err.into())
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MoveFileRequest {
+    path_old: String,
+    path_new: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/move/",
+    tag = "files",
+    responses(
+        (status = 200, description = "The file got moved")
+    )
+)]
+pub async fn endpoint_move_file(
+    State(database): State<FileDatabase>,
+    Json(payload): Json<MoveFileRequest>,
 ) -> ApiResult<()> {
     database
-        .delete_file(path, Utc::now())
+        .move_file(payload.path_old, payload.path_new)
         .await
         .map(|_| ApiResponse::success(()))
         .map_err(|err| err.into())

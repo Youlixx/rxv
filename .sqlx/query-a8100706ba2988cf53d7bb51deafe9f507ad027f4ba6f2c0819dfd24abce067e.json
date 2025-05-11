@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                files.original_file_name,\n                files.size,\n                files.hash,\n                files.upload_date\n            FROM files\n            INNER JOIN paths ON files.id == paths.file_id\n            WHERE ? >= paths.valid_since\n                AND ? < COALESCE(paths.valid_until, '9999-12-31T23:59:59Z')\n                AND paths.path == ?;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "original_file_name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "size",
+        "ordinal": 1,
+        "type_info": "Int64"
+      },
+      {
+        "name": "hash",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "upload_date",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a8100706ba2988cf53d7bb51deafe9f507ad027f4ba6f2c0819dfd24abce067e"
+}

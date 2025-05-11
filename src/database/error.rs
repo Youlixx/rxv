@@ -1,7 +1,5 @@
 use std::io;
 
-use chrono::{DateTime, Utc};
-
 use super::virtual_path::VirtualPath;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -17,12 +15,6 @@ pub enum InternalError {
 
     #[error("Malformed timestamp within the SQL table: {0}")]
     MalformedTimestamp(#[from] chrono::ParseError),
-
-    #[error("Inconsistent timestamp")]
-    InconsistentTimestamp {
-        existing: DateTime<Utc>,
-        inserted: DateTime<Utc>,
-    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -34,8 +26,17 @@ pub enum Error {
     #[error("the virtual path must point to a file")]
     NotAVirtualFile(VirtualPath),
 
+    #[error("the virtual path must point to a directory")]
+    NotAVirtualDirectory(VirtualPath),
+
     #[error("the virtual file could not be found")]
     VirtualFileNotFound(VirtualPath),
+
+    #[error("the virtual paths points to object of different types")]
+    InconsistentVirtualPaths {
+        path_old: VirtualPath,
+        path_new: VirtualPath,
+    },
 
     #[error("Unknown error: {0}")]
     Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
